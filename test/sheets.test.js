@@ -65,7 +65,10 @@ function mockAppsScript() {
       waitLock() { assert.equal(locked, false); locked = true; },
       releaseLock() { assert.equal(locked, true); locked = false; },
     }) },
-    ContentService: { createTextOutput: (content) => content },
+    ContentService: {
+      MimeType: { JSON: "application/json" },
+      createTextOutput: (content) => ({ content, setMimeType: (mimeType) => ({ content, mimeType }) }),
+    },
     HtmlService: {
       createHtmlOutput: (html) => ({ setXFrameOptionsMode: () => html }),
       XFrameOptionsMode: { ALLOWALL: "ALLOWALL" },
@@ -82,6 +85,7 @@ function send(app, fields) {
   const token = randomUUID();
   const origin = "https://reviewer.example";
   const html = app.doPost({ parameter: { submission: JSON.stringify({ token, origin, ...fields }) } });
+  if (typeof html !== "string") return html.content;
   const code = html.match(/<script>([\s\S]*)<\/script>/)?.[1];
   if (!code) return html;
   let receipt;
@@ -92,6 +96,30 @@ function send(app, fields) {
   } } } });
   return receipt;
 }
+
+function sendJson(app, fields) {
+  const response = app.doPost({ parameter: { transport: "json", submission: JSON.stringify(fields) } });
+  assert.equal(response.mimeType, "application/json");
+  return JSON.parse(response.content);
+}
+
+test("the JSON transport can start and submit an exam without an iframe receipt", () => {
+  const { app, rows } = mockAppsScript();
+  const begin = sendJson(app, { action: "begin", level: "professional", mode: "quick" });
+  assert.equal(begin.ok, true);
+  assert.equal(begin.data.questions.length, 20);
+  assert.ok(begin.data.questions.every((item) => !("correct" in item)));
+  assert.equal(rows.length, 1);
+
+  const submit = { action: "submit", ticket: begin.data.ticket, answers: {} };
+  const result = sendJson(app, submit);
+  assert.equal(result.ok, true);
+  assert.equal(Object.keys(result.data.solutions).length, 20);
+  assert.equal(rows.length, 2);
+  assert.equal(sendJson(app, submit).ok, true);
+  assert.equal(rows.length, 2);
+  assert.equal(sendJson(app, { ...submit, ticket: "invalid" }).ok, false);
+});
 
 function start(app, level = "professional", mode = "quick") {
   const response = send(app, { action: "begin", level, mode });

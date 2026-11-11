@@ -272,7 +272,6 @@ function Exam({ attempt, onFinish, onQuit, submitting, submitError }) {
         <progress className="exam-progress" value={answeredCount} max={questions.length} aria-label="Questions answered" />
       </div>
       {!saved && <p className="save-warning" role="status">This attempt could not be saved on this device. Keep this tab open to finish it.</p>}
-      {submitting && <p className="save-warning" role="status">Grading your exam and saving your score…</p>}
       {submitError && <div className="save-warning" role="alert">{submitError}{" "}
         <button className="text-button" type="button" onClick={() => finish()}>Retry submission</button>
       </div>}
@@ -321,11 +320,29 @@ function Exam({ attempt, onFinish, onQuit, submitting, submitError }) {
           <button className="button secondary navigator-submit" type="button" onClick={() => setConfirmation("submit")}>Submit exam <ChevronRight size={17} /></button>
         </aside>
       </div>
-      {confirmation && (
+      {submitting ? <SubmissionLoader /> : confirmation && (
         <Confirmation kind={confirmation} unanswered={questions.length - answeredCount} saved={saved}
           onClose={() => setConfirmation("")} onConfirm={confirmation === "submit" ? () => finish() : onQuit} />
       )}
     </>
+  );
+}
+
+function SubmissionLoader() {
+  const dialog = useRef(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element.showModal();
+    return () => element.close();
+  }, []);
+
+  return (
+    <dialog className="confirmation submission-loader" ref={dialog}
+      onCancel={(event) => event.preventDefault()} aria-labelledby="submission-title">
+      <div className="submission-spinner" aria-hidden="true" />
+      <h2 id="submission-title">Submitting your exam</h2>
+      <p role="status">Grading your answers and saving your score…</p>
+    </dialog>
   );
 }
 

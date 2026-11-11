@@ -19,7 +19,7 @@
 
 1. The examinee selects a level and mode. They can enter a name or leave the field blank to be recorded as Anonymous.
 2. Apps Script samples and shuffles questions from the private bank. The browser receives the prompts, choices, and a signed attempt ticket. It saves those fields with the deadline, selected answers, review flags, and question position. Names remain in memory.
-3. The browser sends the ticket, selected answers, and optional name on submission, at the deadline, or when the user resumes an expired attempt.
+3. The browser sends the ticket, selected answers, and optional name in a form-encoded POST and reads the JSON response. It submits when the user finishes, at the deadline, or when the user resumes an expired attempt.
 4. Apps Script verifies the ticket and grades the assigned questions. A script lock protects the score write. A keyed digest in the attempt ID cell’s note allows identical retries and rejects modified resubmissions.
 5. Apps Script returns the score and that attempt’s solutions after the Sheet write. Results highlight the lowest-scoring section and link to a study session. Local history keeps the last 30 summaries without names.
 

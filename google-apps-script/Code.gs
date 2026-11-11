@@ -40,16 +40,22 @@ function doGet() {
 }
 
 function doPost(event) {
+  const useJson = event.parameter.transport === "json";
   let submission;
   try {
     const raw = event.parameter.submission;
     if (!raw || raw.length > 65000) throw new Error("Invalid request.");
     submission = JSON.parse(raw);
   } catch {
-    return ContentService.createTextOutput("Invalid request.");
+    return useJson ? jsonExamResponse_({ ok: false, message: "Invalid request." })
+      : ContentService.createTextOutput("Invalid request.");
   }
-  if (!submission || typeof submission.token !== "string" || !UUID_PATTERN.test(submission.token) ||
-      typeof submission.origin !== "string" || !ORIGIN_PATTERN.test(submission.origin)) {
+  if (!submission || typeof submission !== "object" || Array.isArray(submission)) {
+    return useJson ? jsonExamResponse_({ ok: false, message: "Invalid request." })
+      : ContentService.createTextOutput("Invalid request.");
+  }
+  if (!useJson && (typeof submission.token !== "string" || !UUID_PATTERN.test(submission.token) ||
+      typeof submission.origin !== "string" || !ORIGIN_PATTERN.test(submission.origin))) {
     return ContentService.createTextOutput("Invalid receipt destination.");
   }
 
@@ -63,12 +69,19 @@ function doPost(event) {
     result = { ok: false, message: error.publicMessage || "The timed exam service is unavailable. Try again." };
   }
 
+  if (useJson) return jsonExamResponse_(result);
+
+  // Support clients loaded before the JSON transport was deployed.
   const receipt = JSON.stringify({ type: "csc-reviewer-score", token: submission.token, ...result })
     .replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
   return HtmlService.createHtmlOutput(
     "<!doctype html><script>window.top.postMessage(" + receipt + "," +
     JSON.stringify(submission.origin) + ");</script>"
   ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function jsonExamResponse_(result) {
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
 }
 
 function invalidExam_(message) {

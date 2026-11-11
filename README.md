@@ -43,6 +43,8 @@ Open [localhost:3000](http://localhost:3000). Study Mode works before you connec
 
 The start response contains question text, shuffled choices, and a signed ticket. Apps Script checks the ticket, grades the assigned questions, and returns explanations after saving the score. Identical retries reuse the original score row. The web app accepts anonymous submissions, and the Sheet’s sharing settings control who can read names and scores.
 
+Deploy the updated `Code.gs` before publishing a frontend that uses JSON requests. The updated script also accepts the previous frontend’s requests during rollout. Use the existing `/exec` URL.
+
 The answer review reveals that attempt’s solutions after submission. For a higher-stakes assessment, consider delaying answer release, adding rate limits or access codes, and recording answers server-side before the deadline.
 
 ## Deploy on Netlify

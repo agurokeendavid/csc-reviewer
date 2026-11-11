@@ -152,6 +152,20 @@ fieldset { margin: 17px 0 0; padding: 0; border: 0; min-width: 0; }
 .focus-section p { color: var(--muted); font-size: 12px; }
 .focus-section > strong { display: block; margin-top: 3px; }
 .save-warning { margin: 0 0 12px; font-size: 13px; color: #85492a; }
+.submission-loader { text-align: center; }
+.submission-spinner {
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 14px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: submission-spin .8s linear infinite;
+}
+@keyframes submission-spin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) {
+  .submission-spinner { animation: none; }
+}
 .result-hero .save-warning { color: #85492a; }
 
 .session-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-end; margin: 27px 0 12px; }
