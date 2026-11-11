@@ -373,6 +373,7 @@ export default function Reviewer() {
         {result && <Results attempt={attempt} result={result} storage={storage} retry={() => persist(result)} reset={reset} />}
       </main>
       <footer className="shell site-footer"><p>Unofficial Philippine Civil Service Exam reviewer · Original practice questions</p>
+        <p>Created by Keen David Aguro</p>
         <a href={CSC_GUIDE} target="_blank" rel="noreferrer">Official exam scope <ArrowUpRight size={14} /></a></footer>
     </>
   );
