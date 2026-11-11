@@ -5,9 +5,12 @@ An unofficial Philippine Civil Service Exam reviewer with timed Professional and
 ## Features
 
 - Full-length mocks based on the 2026 Career Service Examination, Pen and Paper Test (CSE-PPT), plus a 20-question quick practice mode.
-- A bundled bank of 433 original practice items, including English and Filipino verbal questions. Each attempt samples the bank and shuffles answer choices.
+- Separate banks of original timed-exam and study questions, including English and Filipino verbal items.
 - A countdown timer, question navigator, and review flags. After submission, examinees can see their answers, explanations, and scores by section.
 - An optional name field. When Google Sheets is connected, completed attempts with a blank name appear in the organizer's private sheet as **Anonymous**.
+- Untimed Study Mode by subject or topic, with immediate explanations and a retry round for missed questions.
+- Resume a timed exam after a refresh or after closing the tab. The timer uses the original deadline.
+- Score history on this device, with changes by subject compared to the previous attempt in the same format.
 
 ## Exam formats
 
@@ -27,18 +30,20 @@ npm ci
 npm run dev
 ```
 
-Open [localhost:3000](http://localhost:3000). Practice works before you connect score storage. Examinees can leave their name blank to practice anonymously. After submission, they can review explanations and see scores by section. Reloading or exiting clears the current attempt.
+Open [localhost:3000](http://localhost:3000). Study Mode works before you connect Apps Script. Timed exams use Apps Script to issue questions, grade answers, and save scores. Timed progress stays in the same browser, and the name field is optional again when you resume. The browser keeps the last 30 timed exam and study scores without names.
 
 ## Connect Google Sheets
 
 1. Open your score spreadsheet or create one. Keep its sharing restricted to the organizer and authorized viewers.
-2. Open **Extensions → Apps Script** in the spreadsheet. Paste [Code.gs](google-apps-script/Code.gs) into the editor and save.
+2. Open **Extensions → Apps Script** in the spreadsheet. Replace the main script with [Code.gs](google-apps-script/Code.gs). Add a second **Script** file named **ExamBank** and paste the contents of the private local `google-apps-script/ExamBank.gs` into it. Keep the timed bank in the private Apps Script project and an offline backup. Git ignores this file.
 3. Select and run **setup** in the editor. Complete Google’s authorization prompt and confirm that the **Scores** tab appeared.
-4. Select **Deploy → New deployment → Web app**. Choose **Execute as me** and set **Who has access** to **Anyone** so examinees can submit without signing in. Copy the deployment URL ending in `/exec`. If your Workspace policy prevents anonymous web apps, use a Google account that allows this access.
+4. For an existing web app, open **Deploy → Manage deployments**, edit the active deployment, choose **New version**, and deploy. This keeps your existing `/exec` URL. For a new deployment, choose **Web app**, **Execute as me**, and access for **Anyone** so examinees can submit anonymously. Archive any other active deployments that still accept client-calculated scores.
 5. To test locally, copy `.env.example` to `.env.local`, set `NEXT_PUBLIC_SCORE_ENDPOINT` to the deployment URL, and restart the dev server. Set the same key in Netlify’s build environment before deploying.
 6. In a private browser window, submit a quick attempt with the name blank. Confirm that the app displays **Saved to Google Sheets** and that the sheet contains one matching row with **Anonymous** in the Name column.
 
-After editing Apps Script, release a new version via **Deploy → Manage deployments**. The endpoint validates score fields and deduplicates retries. The URL is public. Because the browser grades the test, the endpoint accepts well-formed scores from anyone with the URL. The sheet’s sharing settings control who can read names and scores.
+The start response contains question text, shuffled choices, and a signed ticket. Apps Script checks the ticket, grades the assigned questions, and returns explanations after saving the score. Identical retries reuse the original score row. The web app accepts anonymous submissions, and the Sheet’s sharing settings control who can read names and scores.
+
+The answer review reveals that attempt’s solutions after submission. For a higher-stakes assessment, consider delaying answer release, adding rate limits or access codes, and recording answers server-side before the deadline.
 
 ## Deploy on Netlify
 

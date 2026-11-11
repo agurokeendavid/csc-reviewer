@@ -25,4 +25,6 @@ Use the [2026 CSC exam advisory](https://csc.gov.ph/examination-advisories/exam-
 | Clerical | — | 38 | 5 in Subprofessional |
 | General Information | 32 | 30 | 5 |
 
-The bundled bank includes authored items and procedural variants. Each attempt samples from the bank locally and requires no question API credentials.
+Study Mode uses the bundled public bank. Timed exams draw from the separate private `google-apps-script/ExamBank.gs` in Apps Script. Keep the timed file out of version control and preserve a private backup. Each timed item supplies a topic, prompt, correct choice, three distractors, explanation, and optional source URL. Change `TIMED_EXAM_BANK_VERSION` when changing a published bank. Existing tickets refer to the version that issued them.
+
+The CSC’s published coverage guides original question writing. Its [test banking description](https://csc.gov.ph/office-functions/erpo) describes its internal exam development process. This project has no dependency on a third-party questionnaire API.

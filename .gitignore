@@ -11,6 +11,9 @@ coverage/
 .env.*
 !.env.example
 
+# Private answer bank for timed exams
+/google-apps-script/ExamBank.gs
+
 # Package-manager logs and OS files
 npm-debug.log*
 pnpm-debug.log*
