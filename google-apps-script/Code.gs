@@ -12,7 +12,8 @@ const EXAM_FORMATS = {
   subprofessional: { minutes: 160, sections: { verbal: 42, numerical: 35, clerical: 38, general: 30 } },
 };
 const SIGNING_KEY_PROPERTY = "EXAM_SIGNING_KEY";
-const DAILY_EXAM_BANK_VERSION = "2026-daily-1";
+const PREVIOUS_DAILY_EXAM_BANK_VERSION = "2026-daily-1";
+const DAILY_EXAM_BANK_VERSION = "2026-daily-2";
 
 // Run once from the editor of the script bound to the destination spreadsheet.
 function setup() {
@@ -107,7 +108,10 @@ function shuffleExam_(values) {
 function selectExamItems_(bank, count, section, recent) {
   const topics = new Map();
   const choiceSets = new Set();
-  for (const index of shuffleExam_(bank.map((_, i) => i))) {
+  const indices = shuffleExam_(bank.map((_, index) => index));
+  const isRecent = (index) => recent.has(section + "-" + index);
+  indices.sort((left, right) => Number(isRecent(left)) - Number(isRecent(right)));
+  for (const index of indices) {
     const [topic, , ...choices] = bank[index];
     const options = choices.slice(0, 4).map(String).sort();
     const key = JSON.stringify(options);
@@ -115,17 +119,12 @@ function selectExamItems_(bank, count, section, recent) {
     choiceSets.add(key);
     if (!topics.has(topic)) topics.set(topic, { fresh: [], recent: [] });
     const group = topics.get(topic);
-    group[recent.has(section + "-" + index) ? "recent" : "fresh"].push(index);
+    group[isRecent(index) ? "recent" : "fresh"].push(index);
   }
   if (choiceSets.size < count) throw new Error("Private question bank has too few distinct items.");
 
   const selected = [];
   const groups = [...topics.values()];
-  for (const group of groups) {
-    const bucket = group.fresh.length ? group.fresh : group.recent;
-    selected.push(bucket.pop());
-    if (selected.length === count) return shuffleExam_(selected);
-  }
   for (const priority of ["fresh", "recent"]) {
     while (selected.length < count && groups.some((group) => group[priority].length)) {
       for (const group of groups) {
@@ -155,7 +154,8 @@ function decodeExam_(ticket) {
   }
   if (difference) invalidExam_("This exam ticket is invalid.");
   const attempt = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(payload)).getDataAsString());
-  if (attempt.version !== TIMED_EXAM_BANK_VERSION && attempt.version !== DAILY_EXAM_BANK_VERSION) {
+  const supportedVersions = [TIMED_EXAM_BANK_VERSION, PREVIOUS_DAILY_EXAM_BANK_VERSION, DAILY_EXAM_BANK_VERSION];
+  if (!supportedVersions.includes(attempt.version)) {
     invalidExam_("The question bank has changed. Start a new timed exam.");
   }
   return attempt;
@@ -169,7 +169,7 @@ function beginExam_(request) {
   const format = EXAM_FORMATS[level];
   const start = Date.now();
   const day = Math.floor((start + 8 * 60 * 60000) / 86400000);
-  const dailyBank = buildDailyTimedBank_(day);
+  const dailyBank = buildExpandedDailyTimedBank_(day);
   const recent = new Set(Array.isArray(request.recentQuestionIds)
     ? request.recentQuestionIds.slice(0, 150).filter((id) => typeof id === "string" && /^[a-z]+-\d{1,4}$/.test(id))
     : []);
@@ -195,7 +195,9 @@ function beginExam_(request) {
 
 function submitExam_(request) {
   const attempt = decodeExam_(request.ticket);
-  const examBank = attempt.version === DAILY_EXAM_BANK_VERSION ? buildDailyTimedBank_(attempt.day) : TIMED_EXAM_BANK;
+  let examBank = TIMED_EXAM_BANK;
+  if (attempt.version === DAILY_EXAM_BANK_VERSION) examBank = buildExpandedDailyTimedBank_(attempt.day);
+  if (attempt.version === PREVIOUS_DAILY_EXAM_BANK_VERSION) examBank = buildDailyTimedBank_(attempt.day);
   const name = (typeof request.name === "string" ? request.name.trim() : "") || "Anonymous";
   if ((request.name !== undefined && typeof request.name !== "string") ||
       name.length < 2 || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name) ||

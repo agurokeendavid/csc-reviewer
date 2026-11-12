@@ -358,9 +358,10 @@ function SubmissionLoader() {
   return (
     <dialog className="confirmation submission-loader" ref={dialog}
       onCancel={(event) => event.preventDefault()} aria-labelledby="submission-title">
-      <div className="submission-spinner" aria-hidden="true">
-        <span className="submission-spinner-ring" />
-        <span className="submission-spinner-dot" />
+      <div className="submission-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
       </div>
       <h2 id="submission-title">Submitting your exam</h2>
       <p role="status">Grading your answers and saving your score…</p>

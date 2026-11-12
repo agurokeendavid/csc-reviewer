@@ -13,6 +13,13 @@ const publicFixture = Object.fromEntries(Object.entries(BANK).map(([section, ite
 const bankSource = existsSync(privateBank) ? readFileSync(privateBank, "utf8") : "";
 const testTime = Date.parse("2026-11-12T15:59:00Z");
 
+function buildFixtureBank(day) {
+  return {
+    ...publicFixture,
+    numerical: publicFixture.numerical.map(([topic, prompt, ...rest]) => [topic, `${day} ${prompt}`, ...rest]),
+  };
+}
+
 function mockAppsScript() {
   const rows = [];
   const notes = new Map();
@@ -48,10 +55,8 @@ function mockAppsScript() {
     Date: class extends Date { static now() { return now; } },
     TIMED_EXAM_BANK: publicFixture,
     TIMED_EXAM_BANK_VERSION: "test",
-    buildDailyTimedBank_: (day) => ({
-      ...publicFixture,
-      numerical: publicFixture.numerical.map(([topic, prompt, ...rest]) => [topic, `${day} ${prompt}`, ...rest]),
-    }),
+    buildDailyTimedBank_: buildFixtureBank,
+    buildExpandedDailyTimedBank_: buildFixtureBank,
     Utilities: {
       getUuid: randomUUID,
       Charset: { UTF_8: "utf8" },
@@ -83,7 +88,10 @@ function mockAppsScript() {
     },
     console: { error() {} },
   };
-  const app = runInNewContext(`${bankSource}\n${script}\n({ setup, doPost, buildDailyTimedBank_, TIMED_EXAM_BANK, TIMED_EXAM_BANK_VERSION, signExam_ })`, globals);
+  const app = runInNewContext(`${bankSource}\n${script}\n({
+    setup, doPost, buildDailyTimedBank_, buildExpandedDailyTimedBank_, TIMED_EXAM_BANK,
+    TIMED_EXAM_BANK_VERSION, PREVIOUS_DAILY_EXAM_BANK_VERSION, signExam_
+  })`, globals);
   app.setup();
   app.setup();
   return { app, rows, setTime: (time) => { now = time; } };
@@ -163,7 +171,7 @@ test("the server grades assigned options, reveals solutions after saving, and ac
   const exam = start(app);
   const [first] = exam.questions;
   const { day } = JSON.parse(Buffer.from(exam.ticket.split(".")[0], "base64url").toString());
-  const correct = String(app.buildDailyTimedBank_(day).verbal[Number(first.id.split("-")[1])][2]);
+  const correct = String(app.buildExpandedDailyTimedBank_(day).verbal[Number(first.id.split("-")[1])][2]);
   const submission = { action: "submit", ticket: exam.ticket, answers: { [first.id]: correct }, correct: 20 };
   const receipt = send(app, submission);
   assert.equal(receipt.ok, true, receipt.message);
@@ -188,12 +196,12 @@ test("retakes prefer fresh IDs and grading keeps the question version issued bef
   const item = exam.questions.find(({ section }) => section === "numerical");
   const index = Number(item.id.split("-")[1]);
   const { day } = JSON.parse(Buffer.from(exam.ticket.split(".")[0], "base64url").toString());
-  const before = app.buildDailyTimedBank_(day).numerical[index];
+  const before = app.buildExpandedDailyTimedBank_(day).numerical[index];
   setTime(testTime + 120000);
   const after = start(app);
   const nextTicket = JSON.parse(Buffer.from(after.ticket.split(".")[0], "base64url").toString());
   assert.equal(nextTicket.day, day + 1);
-  assert.notEqual(app.buildDailyTimedBank_(nextTicket.day).numerical[index][1], before[1]);
+  assert.notEqual(app.buildExpandedDailyTimedBank_(nextTicket.day).numerical[index][1], before[1]);
   const result = sendJson(app, { action: "submit", ticket: exam.ticket, answers: { [item.id]: String(before[2]) } });
   assert.equal(result.ok, true);
   assert.equal(result.data.correct, 1);
@@ -203,7 +211,7 @@ test("private daily variants provide distinct items and four different choices",
   const { app } = mockAppsScript();
   const firstDay = Math.floor(testTime / 86400000);
   for (let day = firstDay; day < firstDay + 500; day++) {
-    for (const [section, items] of Object.entries(app.buildDailyTimedBank_(day))) {
+    for (const [section, items] of Object.entries(app.buildExpandedDailyTimedBank_(day))) {
       const keys = new Set();
       for (const [topic, prompt, ...options] of items) {
         const choices = options.slice(0, 4).map(String).sort();
@@ -214,6 +222,56 @@ test("private daily variants provide distinct items and four different choices",
       }
     }
   }
+});
+
+test("the expanded private General Information bank supports a fresh full retake", { skip: !bankSource }, () => {
+  const { app } = mockAppsScript();
+  const exam = start(app, "professional", "full");
+  const { day } = JSON.parse(Buffer.from(exam.ticket.split(".")[0], "base64url").toString());
+  const general = app.buildExpandedDailyTimedBank_(day).general;
+  const original = app.buildDailyTimedBank_(day).general;
+  assert.deepEqual(general.slice(0, original.length), original);
+  assert.equal(general.length, 70);
+  assert.equal(new Set(general.map(([, prompt]) => prompt.trim().toLowerCase())).size, general.length);
+  assert.ok(general.slice(original.length).every((item) => item[7]?.startsWith("https://")));
+
+  const previous = new Set(exam.questions.map(({ id }) => id));
+  const retry = sendJson(app, {
+    action: "begin", level: "professional", mode: "full", recentQuestionIds: [...previous],
+  });
+  assert.equal(retry.ok, true);
+  const questions = retry.data.questions.filter(({ section }) => section === "general");
+  assert.equal(questions.length, 32);
+  assert.ok(questions.every(({ id }) => !previous.has(id)));
+
+  const indexOf = ({ id }) => Number(id.split("-")[1]);
+  const attemptWithNewItem = [exam, retry.data].find(({ questions }) =>
+    questions.some((question) => question.section === "general" && indexOf(question) >= original.length));
+  assert.ok(attemptWithNewItem);
+  const item = attemptWithNewItem.questions.find((question) =>
+    question.section === "general" && indexOf(question) >= original.length);
+  const result = sendJson(app, {
+    action: "submit", ticket: attemptWithNewItem.ticket,
+    answers: { [item.id]: String(general[indexOf(item)][2]) },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.correct, 1);
+});
+
+test("timed exams issued with the previous daily bank can still be submitted", () => {
+  const { app } = mockAppsScript();
+  const day = Math.floor((testTime + 8 * 60 * 60000) / 86400000);
+  const item = app.buildDailyTimedBank_(day).numerical[0];
+  const encoded = Buffer.from(JSON.stringify({
+    id: randomUUID(), level: "professional", mode: "quick", ids: [["numerical", 0]], day,
+    start: testTime, deadline: testTime + 1500000, version: app.PREVIOUS_DAILY_EXAM_BANK_VERSION,
+  })).toString("base64url");
+  const result = sendJson(app, {
+    action: "submit", ticket: encoded + "." + app.signExam_(encoded),
+    answers: { "numerical-0": String(item[2]) },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.correct, 1);
 });
 
 test("timed exams issued before the daily rotation rollout can still be submitted", () => {
