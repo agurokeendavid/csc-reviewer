@@ -13,7 +13,8 @@ const EXAM_FORMATS = {
 };
 const SIGNING_KEY_PROPERTY = "EXAM_SIGNING_KEY";
 const PREVIOUS_DAILY_EXAM_BANK_VERSION = "2026-daily-1";
-const DAILY_EXAM_BANK_VERSION = "2026-daily-2";
+const EXPANDED_DAILY_EXAM_BANK_VERSION = "2026-daily-2";
+const DAILY_EXAM_BANK_VERSION = "2026-daily-3";
 
 // Run once from the editor of the script bound to the destination spreadsheet.
 function setup() {
@@ -105,12 +106,33 @@ function shuffleExam_(values) {
   return copy;
 }
 
-function selectExamItems_(bank, count, section, recent) {
+function dailyPreferredIndices_(bank, day) {
+  const topics = new Map();
+  for (const [index, [topic]] of bank.entries()) {
+    if (!topics.has(topic)) topics.set(topic, []);
+    topics.get(topic).push(index);
+  }
+
+  const preferred = new Set();
+  for (const indices of topics.values()) {
+    // Move the preferred window through each topic without changing any question IDs.
+    const start = day % indices.length;
+    const size = Math.max(1, Math.floor(indices.length * 2 / 3));
+    for (let offset = 0; offset < size; offset++) {
+      preferred.add(indices[(start + offset) % indices.length]);
+    }
+  }
+  return preferred;
+}
+
+function selectExamItems_(bank, count, section, recent, day) {
   const topics = new Map();
   const choiceSets = new Set();
   const indices = shuffleExam_(bank.map((_, index) => index));
   const isRecent = (index) => recent.has(section + "-" + index);
-  indices.sort((left, right) => Number(isRecent(left)) - Number(isRecent(right)));
+  const preferred = dailyPreferredIndices_(bank, day);
+  const priorityOf = (index) => 2 * Number(isRecent(index)) + Number(!preferred.has(index));
+  indices.sort((left, right) => priorityOf(left) - priorityOf(right));
   for (const index of indices) {
     const [topic, , ...choices] = bank[index];
     const options = choices.slice(0, 4).map(String).sort();
@@ -128,7 +150,7 @@ function selectExamItems_(bank, count, section, recent) {
   for (const priority of ["fresh", "recent"]) {
     while (selected.length < count && groups.some((group) => group[priority].length)) {
       for (const group of groups) {
-        if (group[priority].length) selected.push(group[priority].pop());
+        if (group[priority].length) selected.push(group[priority].shift());
         if (selected.length === count) break;
       }
     }
@@ -154,7 +176,10 @@ function decodeExam_(ticket) {
   }
   if (difference) invalidExam_("This exam ticket is invalid.");
   const attempt = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(payload)).getDataAsString());
-  const supportedVersions = [TIMED_EXAM_BANK_VERSION, PREVIOUS_DAILY_EXAM_BANK_VERSION, DAILY_EXAM_BANK_VERSION];
+  const supportedVersions = [
+    TIMED_EXAM_BANK_VERSION, PREVIOUS_DAILY_EXAM_BANK_VERSION,
+    EXPANDED_DAILY_EXAM_BANK_VERSION, DAILY_EXAM_BANK_VERSION,
+  ];
   if (!supportedVersions.includes(attempt.version)) {
     invalidExam_("The question bank has changed. Start a new timed exam.");
   }
@@ -169,7 +194,7 @@ function beginExam_(request) {
   const format = EXAM_FORMATS[level];
   const start = Date.now();
   const day = Math.floor((start + 8 * 60 * 60000) / 86400000);
-  const dailyBank = buildExpandedDailyTimedBank_(day);
+  const dailyBank = buildRotatingTimedBank_(day);
   const recent = new Set(Array.isArray(request.recentQuestionIds)
     ? request.recentQuestionIds.slice(0, 150).filter((id) => typeof id === "string" && /^[a-z]+-\d{1,4}$/.test(id))
     : []);
@@ -178,7 +203,7 @@ function beginExam_(request) {
   for (const [section, fullCount] of Object.entries(format.sections)) {
     const bank = dailyBank[section];
     const count = mode === "quick" ? 5 : fullCount;
-    for (const index of selectExamItems_(bank, count, section, recent)) {
+    for (const index of selectExamItems_(bank, count, section, recent, day)) {
       const [topic, prompt, correct, wrongA, wrongB, wrongC] = bank[index];
       const id = section + "-" + index;
       ids.push([section, index]);
@@ -196,7 +221,8 @@ function beginExam_(request) {
 function submitExam_(request) {
   const attempt = decodeExam_(request.ticket);
   let examBank = TIMED_EXAM_BANK;
-  if (attempt.version === DAILY_EXAM_BANK_VERSION) examBank = buildExpandedDailyTimedBank_(attempt.day);
+  if (attempt.version === DAILY_EXAM_BANK_VERSION) examBank = buildRotatingTimedBank_(attempt.day);
+  if (attempt.version === EXPANDED_DAILY_EXAM_BANK_VERSION) examBank = buildExpandedDailyTimedBank_(attempt.day);
   if (attempt.version === PREVIOUS_DAILY_EXAM_BANK_VERSION) examBank = buildDailyTimedBank_(attempt.day);
   const name = (typeof request.name === "string" ? request.name.trim() : "") || "Anonymous";
   if ((request.name !== undefined && typeof request.name !== "string") ||

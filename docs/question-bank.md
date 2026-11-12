@@ -2,6 +2,10 @@
 
 Use the [2026 CSC exam advisory](https://csc.gov.ph/examination-advisories/exam-advisory-no2s2026) for the scope, item counts, and timing. Write original practice items and verify facts against authoritative sources. CSC explains its position on actual exam materials in its [reviewer advisory](https://csc.gov.ph/csc-warns-public-against-civil-service-reviewers-review-centers).
 
+- Verbal covers vocabulary, sentence completion and structure, error recognition, paragraph organization, and reading in English and Filipino.
+- Numerical covers arithmetic, number sequences, and word problems.
+- Analytical covers analogies, symbolic and abstract reasoning, assumptions and conclusions, and data interpretation for Professional exams.
+- Clerical covers filing and spelling for Subprofessional exams.
 - Philippine Constitution questions cite the [1987 Constitution](https://lawphil.net/consti/cons1987.html).
 - Public ethics questions cite [R.A. 6713](https://lawphil.net/statutes/repacts/ra1989/ra_6713_1989.html).
 - Human rights questions cite the [Universal Declaration of Human Rights](https://www.un.org/en/about-us/universal-declaration-of-human-rights/).
@@ -27,7 +31,7 @@ Use the [2026 CSC exam advisory](https://csc.gov.ph/examination-advisories/exam-
 
 Study Mode uses the bundled public bank. Timed exams draw from the separate private `google-apps-script/ExamBank.gs` in Apps Script. Keep the timed file out of version control and preserve a private backup. Each timed item supplies a topic, prompt, correct choice, three distractors, explanation, and optional source URL.
 
-The numerical, analytical, and clerical banks include variants generated from the issue date in Manila. General Information draws randomly from a 70-item authored pool covering the Constitution, public ethics, human rights, and environmental protection. The selector skips identical answer-choice sets within a section and prefers questions outside the previous timed attempt in the same browser. The signed ticket carries the issue date and bank version so an attempt can be graded after midnight. Preserve the published bank version and generator when introducing a replacement so existing tickets can still be graded.
+Each new timed exam uses the issue date in Manila to rotate which items it favors within each topic. Numerical, Analytical, and Clerical also include template variants generated from that date. Verbal and General Information rotate through authored items. General Information has 78 questions with sources. The selector skips identical answer-choice sets within a section and gives first priority to questions outside the previous timed attempt in the same browser. Some questions can recur on later days. The signed ticket carries the issue date and bank version so an attempt can be graded after midnight. Preserve the published bank version and generator when introducing a replacement so existing tickets can still be graded.
 
 Deploy the updated `Code.gs` and private `ExamBank.gs` together as a new version of the existing Apps Script web app. Run `npm test` with the private file present to validate the generated variants and General Information retakes.
 
