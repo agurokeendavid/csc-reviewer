@@ -10,6 +10,7 @@ const EXAM_FORMATS = {
   subprofessional: { minutes: 160, sections: { verbal: 42, numerical: 35, clerical: 38, general: 30 } },
 };
 const SIGNING_KEY_PROPERTY = "EXAM_SIGNING_KEY";
+const DAILY_EXAM_BANK_VERSION = "2026-daily-1";
 
 // Run once from the editor of the script bound to the destination spreadsheet.
 function setup() {
@@ -99,18 +100,34 @@ function shuffleExam_(values) {
   return copy;
 }
 
-function selectExamItems_(bank, count) {
+function selectExamItems_(bank, count, section, recent) {
   const topics = new Map();
+  const choiceSets = new Set();
   for (const index of shuffleExam_(bank.map((_, i) => i))) {
-    const topic = bank[index][0];
-    if (!topics.has(topic)) topics.set(topic, []);
-    topics.get(topic).push(index);
+    const [topic, , ...choices] = bank[index];
+    const options = choices.slice(0, 4).map(String).sort();
+    const key = JSON.stringify(options);
+    if (new Set(options).size !== 4 || choiceSets.has(key)) continue;
+    choiceSets.add(key);
+    if (!topics.has(topic)) topics.set(topic, { fresh: [], recent: [] });
+    const group = topics.get(topic);
+    group[recent.has(section + "-" + index) ? "recent" : "fresh"].push(index);
   }
+  if (choiceSets.size < count) throw new Error("Private question bank has too few distinct items.");
+
   const selected = [];
-  while (selected.length < count) {
-    for (const bucket of topics.values()) {
-      if (bucket.length) selected.push(bucket.pop());
-      if (selected.length === count) break;
+  const groups = [...topics.values()];
+  for (const group of groups) {
+    const bucket = group.fresh.length ? group.fresh : group.recent;
+    selected.push(bucket.pop());
+    if (selected.length === count) return shuffleExam_(selected);
+  }
+  for (const priority of ["fresh", "recent"]) {
+    while (selected.length < count && groups.some((group) => group[priority].length)) {
+      for (const group of groups) {
+        if (group[priority].length) selected.push(group[priority].pop());
+        if (selected.length === count) break;
+      }
     }
   }
   return shuffleExam_(selected);
@@ -134,7 +151,9 @@ function decodeExam_(ticket) {
   }
   if (difference) invalidExam_("This exam ticket is invalid.");
   const attempt = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(payload)).getDataAsString());
-  if (attempt.version !== TIMED_EXAM_BANK_VERSION) invalidExam_("The question bank has changed. Start a new timed exam.");
+  if (attempt.version !== TIMED_EXAM_BANK_VERSION && attempt.version !== DAILY_EXAM_BANK_VERSION) {
+    invalidExam_("The question bank has changed. Start a new timed exam.");
+  }
   return attempt;
 }
 
@@ -144,13 +163,18 @@ function beginExam_(request) {
     invalidExam_("Choose a valid exam level and mode.");
   }
   const format = EXAM_FORMATS[level];
+  const start = Date.now();
+  const day = Math.floor((start + 8 * 60 * 60000) / 86400000);
+  const dailyBank = buildDailyTimedBank_(day);
+  const recent = new Set(Array.isArray(request.recentQuestionIds)
+    ? request.recentQuestionIds.slice(0, 150).filter((id) => typeof id === "string" && /^[a-z]+-\d{1,4}$/.test(id))
+    : []);
   const ids = [];
   const questions = [];
   for (const [section, fullCount] of Object.entries(format.sections)) {
-    const bank = TIMED_EXAM_BANK[section];
+    const bank = dailyBank[section];
     const count = mode === "quick" ? 5 : fullCount;
-    if (bank.length < count) throw new Error("Private question bank has too few items.");
-    for (const index of selectExamItems_(bank, count)) {
+    for (const index of selectExamItems_(bank, count, section, recent)) {
       const [topic, prompt, correct, wrongA, wrongB, wrongC] = bank[index];
       const id = section + "-" + index;
       ids.push([section, index]);
@@ -158,16 +182,16 @@ function beginExam_(request) {
     }
   }
   const id = Utilities.getUuid();
-  const start = Date.now();
   const deadline = start + (mode === "quick" ? 25 : format.minutes) * 60000;
   const encoded = Utilities.base64EncodeWebSafe(JSON.stringify({
-    id, level, mode, start, deadline, ids, version: TIMED_EXAM_BANK_VERSION,
+    id, level, mode, start, deadline, ids, day, version: DAILY_EXAM_BANK_VERSION,
   }), Utilities.Charset.UTF_8);
   return { id, start, deadline, questions, ticket: encoded + "." + signExam_(encoded) };
 }
 
 function submitExam_(request) {
   const attempt = decodeExam_(request.ticket);
+  const examBank = attempt.version === DAILY_EXAM_BANK_VERSION ? buildDailyTimedBank_(attempt.day) : TIMED_EXAM_BANK;
   const name = (typeof request.name === "string" ? request.name.trim() : "") || "Anonymous";
   if ((request.name !== undefined && typeof request.name !== "string") ||
       name.length < 2 || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name) ||
@@ -181,7 +205,7 @@ function submitExam_(request) {
   let correct = 0;
   for (const [section, index] of attempt.ids) {
     const id = section + "-" + index;
-    const [, , answer, wrongA, wrongB, wrongC, explanation, source] = TIMED_EXAM_BANK[section][index];
+    const [, , answer, wrongA, wrongB, wrongC, explanation, source] = examBank[section][index];
     const key = String(answer);
     const selected = request.answers[id];
     const score = sections[section] || (sections[section] = { correct: 0, total: 0 });

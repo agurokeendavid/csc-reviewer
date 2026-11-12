@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { grade, makeExam, makeStudy, weakestSection } from "../lib/exam.js";
-import { clearDraft, createDraft, readDraft, readHistory, recordScore, saveProgress } from "../lib/practice-storage.js";
+import { clearDraft, createDraft, readDraft, readHistory, readRecentQuestionIds, recordScore, saveProgress } from "../lib/practice-storage.js";
 
 test("timed drafts preserve question order, answers, flags, and deadline without the name", (t) => {
   const storage = new Map();
@@ -36,6 +36,7 @@ test("timed drafts preserve question order, answers, flags, and deadline without
   clearDraft(attempt.id);
   assert.equal(saveProgress(attempt.id, progress), false);
   assert.equal(readDraft(), null);
+  assert.deepEqual(readRecentQuestionIds(), questions.map(({ id }) => id));
 });
 
 test("study drills stay within the selected topic and point to the lowest percentage", () => {

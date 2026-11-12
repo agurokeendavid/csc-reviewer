@@ -25,6 +25,10 @@ Use the [2026 CSC exam advisory](https://csc.gov.ph/examination-advisories/exam-
 | Clerical | — | 38 | 5 in Subprofessional |
 | General Information | 32 | 30 | 5 |
 
-Study Mode uses the bundled public bank. Timed exams draw from the separate private `google-apps-script/ExamBank.gs` in Apps Script. Keep the timed file out of version control and preserve a private backup. Each timed item supplies a topic, prompt, correct choice, three distractors, explanation, and optional source URL. Change `TIMED_EXAM_BANK_VERSION` when changing a published bank. Existing tickets refer to the version that issued them.
+Study Mode uses the bundled public bank. Timed exams draw from the separate private `google-apps-script/ExamBank.gs` in Apps Script. Keep the timed file out of version control and preserve a private backup. Each timed item supplies a topic, prompt, correct choice, three distractors, explanation, and optional source URL.
+
+The numerical, analytical, and clerical banks include variants generated from the issue date in Manila. The selector skips identical answer-choice sets within a section and prefers questions outside the previous timed attempt in the same browser. Authored items still recur, especially in full exams that draw most of the verbal and general-information banks. The signed ticket carries the issue date and bank version so an attempt can be graded after midnight. Preserve the published bank version and generator when introducing a replacement so existing tickets can still be graded.
+
+Deploy the updated `Code.gs` and private `ExamBank.gs` together before publishing the frontend change that sends the previous attempt's question IDs. Run `npm test` with the private file present to validate the generated variants.
 
 The CSC’s published coverage guides original question writing. Its [test banking description](https://csc.gov.ph/office-functions/erpo) describes its internal exam development process. This project has no dependency on a third-party questionnaire API.

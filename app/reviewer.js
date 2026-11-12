@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { clockLabel, CSC_GUIDE, durationLabel, LEVELS, makeStudy, QUICK_MODE, SECTIONS, weakestSection } from "../lib/exam.js";
 import { requestExam, scoreStorageReady } from "../lib/scores.js";
-import { clearDraft, createDraft, readDraft, readHistory, recordScore, saveProgress } from "../lib/practice-storage.js";
+import { clearDraft, createDraft, readDraft, readHistory, readRecentQuestionIds, recordScore, saveProgress } from "../lib/practice-storage.js";
 import ScoreHistory from "./score-history.js";
 import { StudySession, StudySetup } from "./study.js";
 
@@ -464,7 +464,7 @@ export default function Reviewer() {
     setOpening(true);
     setStartError("");
     try {
-      const exam = await requestExam({ action: "begin", level, mode });
+      const exam = await requestExam({ action: "begin", level, mode, recentQuestionIds: readRecentQuestionIds() });
       if (activeRequest.current !== request) return;
       const next = { ...exam, name, level, mode };
       const saved = createDraft(next);
