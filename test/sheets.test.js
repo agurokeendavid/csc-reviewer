@@ -3,7 +3,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
-import { BANK, MIN_SECONDS_PER_ITEM } from "../lib/exam.js";
+import { AWAY_LEAVE_LIMIT, AWAY_SECONDS_LIMIT, BANK, MIN_SECONDS_PER_ITEM } from "../lib/exam.js";
 
 const script = readFileSync(new URL("../google-apps-script/Code.gs", import.meta.url), "utf8");
 const privateBank = new URL("../google-apps-script/ExamBank.gs", import.meta.url);
@@ -409,9 +409,43 @@ test("leaderboard returns the top five for one format without exposing private n
   for (const item of result.data.scores) assert.deepEqual(Object.keys(item).sort(), ["correct", "displayName", "percentage", "total"]);
 });
 
-test("setup adds the late and hide columns next to the public name", () => {
+test("setup adds the late, hide and away columns next to the public name", () => {
   const { rows } = mockAppsScript();
-  assert.deepEqual(Array.from(rows[0].slice(9)), ["Public display name", "Submitted late", "Hide from leaderboard"]);
+  assert.deepEqual(Array.from(rows[0].slice(9)),
+    ["Public display name", "Submitted late", "Hide from leaderboard", "Times left exam page", "Seconds away"]);
+});
+
+test("away counts are saved, reported, and keep a score off the leaderboard past either limit", () => {
+  const { app, rows, setTime } = mockAppsScript();
+  const submit = (name, away) => {
+    const exam = start(app);
+    setTime(exam.start + 10 * 60000);
+    return send(app, { action: "submit", ticket: exam.ticket, name, publishName: true, answers: {}, ...(away && { away }) });
+  };
+  const steady = submit("Steady");
+  const brief = submit("Brief", { leaves: AWAY_LEAVE_LIMIT - 1, awaySeconds: AWAY_SECONDS_LIMIT });
+  const often = submit("Often", { leaves: AWAY_LEAVE_LIMIT, awaySeconds: 5 });
+  const long = submit("Long", { leaves: 1, awaySeconds: AWAY_SECONDS_LIMIT + 1 });
+  const forged = submit("Forged", { leaves: -4, awaySeconds: "lots" });
+  assert.deepEqual([steady, brief, often, long, forged].map(({ data }) => data.awayFlagged), [false, false, true, true, false]);
+  assert.deepEqual(steady.data.away, { leaves: 0, awaySeconds: 0 });
+  assert.deepEqual(often.data.away, { leaves: AWAY_LEAVE_LIMIT, awaySeconds: 5 });
+  const oftenRow = rows.find((row) => row[2] === "Often");
+  assert.deepEqual(Array.from(oftenRow.slice(12, 14)), [AWAY_LEAVE_LIMIT, 5]);
+  assert.equal(rows.find((row) => row[2] === "Steady").length, 11);
+
+  const board = sendJson(app, { action: "leaderboard", level: "professional", mode: "quick" });
+  assert.deepEqual(board.data.scores.map(({ displayName }) => displayName).sort(), ["Brief", "Forged", "Steady"]);
+});
+
+test("a retry reports the away counts first saved for that attempt", () => {
+  const { app, setTime } = mockAppsScript();
+  const exam = start(app);
+  setTime(exam.start + 10 * 60000);
+  send(app, { action: "submit", ticket: exam.ticket, answers: {}, away: { leaves: 4, awaySeconds: 20 } });
+  const retry = send(app, { action: "submit", ticket: exam.ticket, answers: {}, away: { leaves: 0, awaySeconds: 0 } });
+  assert.deepEqual(retry.data.away, { leaves: 4, awaySeconds: 20 });
+  assert.equal(retry.data.awayFlagged, true);
 });
 
 test("the organizer can hide a score, and implausibly fast scores are never listed", () => {
@@ -460,6 +494,8 @@ test("only scores explicitly opting in get a public display name", () => {
   assert.deepEqual(result.data.scores.map(({ displayName }) => displayName), ["Anonymous", "Public name"]);
 });
 
-test("the browser and Apps Script use the same minimum time per question", () => {
+test("the browser and Apps Script use the same minimum time per question and away limits", () => {
   assert.match(script, new RegExp(`const MIN_SECONDS_PER_ITEM = ${MIN_SECONDS_PER_ITEM};`));
+  assert.match(script, new RegExp(`const AWAY_LEAVE_LIMIT = ${AWAY_LEAVE_LIMIT};`));
+  assert.match(script, new RegExp(`const AWAY_SECONDS_LIMIT = ${AWAY_SECONDS_LIMIT};`));
 });

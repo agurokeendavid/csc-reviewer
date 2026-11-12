@@ -19,6 +19,15 @@ const HIDDEN_HEADER = "Hide from leaderboard";
 // Faster than this average can't be a real attempt, for example someone pasting from a
 // collected answer key. The real exam allows about 76 seconds per item.
 const MIN_SECONDS_PER_ITEM = 15;
+// The browser counts how often the examinee left the exam page (switched tab or window,
+// minimized, or closed it) and for how long. Past either limit the score stays off the
+// leaderboard. These counts come from the browser, so a determined cheater can fake them.
+const LEAVES_COLUMN = HIDDEN_COLUMN + 1;
+const LEAVES_HEADER = "Times left exam page";
+const AWAY_COLUMN = LEAVES_COLUMN + 1;
+const AWAY_HEADER = "Seconds away";
+const AWAY_LEAVE_LIMIT = 3;
+const AWAY_SECONDS_LIMIT = 60;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const EXAM_FORMATS = {
   professional: { minutes: 190, sections: { verbal: 43, numerical: 37, analytical: 38, general: 32 } },
@@ -48,6 +57,7 @@ function setup() {
   ensurePublicNameColumn_(sheet);
   ensureHeaderColumn_(sheet, LATE_COLUMN, LATE_HEADER);
   ensureHeaderColumn_(sheet, HIDDEN_COLUMN, HIDDEN_HEADER);
+  ensureAwayColumns_(sheet);
   const properties = PropertiesService.getScriptProperties();
   properties.setProperty("SCORE_SPREADSHEET_ID", spreadsheet.getId());
   if (!properties.getProperty(SIGNING_KEY_PROPERTY)) {
@@ -262,13 +272,35 @@ function submitExam_(request) {
   const digest = signExam_(JSON.stringify(canonicalAnswers));
   const late = Date.now() > attempt.deadline + LATE_GRACE_MS;
   const publishName = request.publishName === true && name !== "Anonymous" && !late;
-  const saved = appendScore_({ ...attempt, name, correct, total, percentage, elapsedSeconds, publishName, late }, digest);
+  const away = readAway_(request.away, attempt);
+  const saved = appendScore_({ ...attempt, name, correct, total, percentage, elapsedSeconds, publishName, late, away }, digest);
   return {
     correct, answered, total, percentage, sections, solutions,
     elapsedSeconds: saved.elapsedSeconds,
     late: saved.late,
     tooFast: !isPlausibleTime_(saved.elapsedSeconds, total),
+    away: saved.away,
+    awayFlagged: isAwayFlagged_(saved.away.leaves, saved.away.awaySeconds),
   };
+}
+
+// Older builds of the site send no away counts, so those count as zero.
+function readAway_(away, attempt) {
+  const count = (value, max) => (Number.isInteger(value) && value >= 0 ? Math.min(value, max) : 0);
+  const examSeconds = Math.ceil((attempt.deadline - attempt.start) / 1000);
+  return {
+    leaves: count(away && away.leaves, 10000),
+    awaySeconds: count(away && away.awaySeconds, examSeconds),
+  };
+}
+
+function isAwayFlagged_(leaves, awaySeconds) {
+  return Number(leaves) >= AWAY_LEAVE_LIMIT || Number(awaySeconds) > AWAY_SECONDS_LIMIT;
+}
+
+function ensureAwayColumns_(sheet) {
+  ensureHeaderColumn_(sheet, LEAVES_COLUMN, LEAVES_HEADER);
+  ensureHeaderColumn_(sheet, AWAY_COLUMN, AWAY_HEADER);
 }
 
 function isPlausibleTime_(elapsedSeconds, total) {
@@ -356,24 +388,26 @@ function readLeaderboard_(request) {
   const rowCount = sheet.getLastRow() - 1;
   if (rowCount < 1) return { scores: [] };
   // Only trust the optional columns whose headers match, in case a column was repurposed.
-  const lastColumn = Math.max(SCORE_HEADERS.length, Math.min(sheet.getLastColumn(), HIDDEN_COLUMN));
+  const lastColumn = Math.max(SCORE_HEADERS.length, Math.min(sheet.getLastColumn(), AWAY_COLUMN));
   const header = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
   const hasColumn = (column, title) => header[column - 1] === title;
   const hasPublicNames = hasColumn(PUBLIC_NAME_COLUMN, PUBLIC_NAME_HEADER);
   const hasLateFlags = hasColumn(LATE_COLUMN, LATE_HEADER);
   const hasHiddenFlags = hasColumn(HIDDEN_COLUMN, HIDDEN_HEADER);
+  const hasAwayCounts = hasColumn(LEAVES_COLUMN, LEAVES_HEADER) && hasColumn(AWAY_COLUMN, AWAY_HEADER);
   const levelLabel = level === "professional" ? "Professional" : "Subprofessional";
   const modeLabel = mode === "quick" ? "Quick practice" : "Full mock exam";
   const expectedTotal = mode === "quick" ? 20 : Object.values(EXAM_FORMATS[level].sections).reduce((sum, size) => sum + size, 0);
   // Start at column D so private names and attempt IDs never enter the leaderboard data.
   const rows = sheet.getRange(2, 4, rowCount, lastColumn - 3).getValues();
   const scores = rows
-    .filter(([rowLevel, rowMode, correct, total, , elapsedSeconds, , late, hidden]) =>
+    .filter(([rowLevel, rowMode, correct, total, , elapsedSeconds, , late, hidden, leaves, awaySeconds]) =>
       rowLevel === levelLabel && rowMode === modeLabel &&
       total === expectedTotal && Number.isInteger(correct) && correct >= 0 && correct <= total &&
       isPlausibleTime_(elapsedSeconds, total) &&
       !(hasLateFlags && late === "Yes") &&
-      !(hasHiddenFlags && isMarked_(hidden)))
+      !(hasHiddenFlags && isMarked_(hidden)) &&
+      !(hasAwayCounts && isAwayFlagged_(leaves, awaySeconds)))
     .map(([, , correct, total, , elapsedSeconds, publicName]) => ({
       displayName: hasPublicNames && typeof publicName === "string" && publicName.trim()
         ? publicName.trim().slice(0, 80) : "Anonymous",
@@ -402,25 +436,34 @@ function appendScore_(score, digest) {
       if (previous.getNote() !== digest) invalidExam_("This attempt has already been submitted.");
       // A retry reports what was first saved, so a slow retry can't turn an on-time score late.
       const row = previous.getRow();
+      const [leaves, awaySeconds] = sheet.getRange(row, LEAVES_COLUMN, 1, 2).getValues()[0];
       return {
         elapsedSeconds: sheet.getRange(row, 9).getValue(),
         late: sheet.getRange(row, LATE_COLUMN).getValue() === "Yes",
+        away: { leaves: Number(leaves) || 0, awaySeconds: Number(awaySeconds) || 0 },
       };
     }
 
-    if (score.publishName || score.late) ensurePublicNameColumn_(sheet);
-    if (score.late) ensureHeaderColumn_(sheet, LATE_COLUMN, LATE_HEADER);
+    const wasAway = score.away.leaves > 0 || score.away.awaySeconds > 0;
+    if (score.publishName || score.late || wasAway) ensurePublicNameColumn_(sheet);
+    if (score.late || wasAway) ensureHeaderColumn_(sheet, LATE_COLUMN, LATE_HEADER);
+    if (wasAway) {
+      ensureHeaderColumn_(sheet, HIDDEN_COLUMN, HIDDEN_HEADER);
+      ensureAwayColumns_(sheet);
+    }
     const safeName = /^[=+\-@]/.test(score.name) ? "'" + score.name : score.name;
-    sheet.appendRow([
+    const row = [
       score.id, new Date(), safeName, score.level === "professional" ? "Professional" : "Subprofessional",
       score.mode === "quick" ? "Quick practice" : "Full mock exam", score.correct, score.total,
       score.percentage, score.elapsedSeconds,
       score.publishName ? "'" + score.name : "",
       score.late ? "Yes" : "",
-    ]);
+    ];
+    if (wasAway) row.push("", score.away.leaves, score.away.awaySeconds);
+    sheet.appendRow(row);
     sheet.getRange(sheet.getLastRow(), 1).setNote(digest);
     SpreadsheetApp.flush();
-    return { elapsedSeconds: score.elapsedSeconds, late: score.late };
+    return { elapsedSeconds: score.elapsedSeconds, late: score.late, away: score.away };
   } finally {
     lock.releaseLock();
   }

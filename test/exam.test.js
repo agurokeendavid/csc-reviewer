@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BANK, clockLabel, countdownLabel, grade, LEVELS, makeExam, nextQuestionRefresh, QUICK_MODE } from "../lib/exam.js";
+import { awayFlagged, BANK, clockLabel, closeAway, countdownLabel, grade, LEVELS, makeExam, nextQuestionRefresh, QUICK_MODE, summarizeAway } from "../lib/exam.js";
 
 function seededRandom(seed) {
   return () => {
@@ -66,4 +66,15 @@ test("countdown labels round up to whole minutes", () => {
   assert.equal(countdownLabel(59 * 60000), "59 min");
   assert.equal(countdownLabel(60 * 60000), "1 hr");
   assert.equal(countdownLabel(5 * 3600000 + 11.5 * 60000), "5 hr 12 min");
+});
+
+test("away tracking ignores blurs under a second and closes an open absence", () => {
+  const start = 1_000_000;
+  assert.deepEqual(closeAway({ leaves: 1, ms: 4000, since: start }, start + 500), { leaves: 1, ms: 4000, since: null });
+  assert.deepEqual(closeAway({ leaves: 1, ms: 4000, since: start }, start + 6000), { leaves: 2, ms: 10000, since: null });
+  assert.deepEqual(summarizeAway(undefined, start), { leaves: 0, awaySeconds: 0 });
+  assert.deepEqual(summarizeAway({ leaves: 2, ms: 1400, since: start }, start + 2600), { leaves: 3, awaySeconds: 4 });
+  assert.equal(awayFlagged({ leaves: 2, awaySeconds: 60 }), false);
+  assert.equal(awayFlagged({ leaves: 3, awaySeconds: 0 }), true);
+  assert.equal(awayFlagged({ leaves: 1, awaySeconds: 61 }), true);
 });

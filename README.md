@@ -47,11 +47,13 @@ Open [localhost:3000](http://localhost:3000). Study Mode works before you connec
 
 The start response contains question text, shuffled choices, and a signed ticket. Apps Script checks the ticket, grades the assigned questions, and returns explanations after saving the score. Identical retries reuse the original score row. The web app accepts anonymous submissions, and the Sheet’s sharing settings control who can read names and scores.
 
-The public leaderboard includes existing scores as Anonymous. Names appear only when an examinee opts in for that attempt. Run `setup` after updating the script to add the **Public display name**, **Submitted late** and **Hide from leaderboard** columns to the existing Scores sheet.
+The public leaderboard includes existing scores as Anonymous. Names appear only when an examinee opts in for that attempt. Run `setup` after updating the script to add the **Public display name**, **Submitted late**, **Hide from leaderboard**, **Times left exam page** and **Seconds away** columns to the existing Scores sheet.
 
 Apps Script answers every request with JSON, and the older iframe receipt has been removed. Earlier builds of the site already try JSON first, so they keep working with the new `Code.gs`.
 
 A submission that arrives more than two minutes after the exam deadline is still graded and saved, but the row is marked **Yes** in a **Submitted late** column and the score stays off the leaderboard. This happens when someone resumes an expired exam after closing the tab. Scores finished faster than 15 seconds per question on average (5 minutes for quick practice) are also left off, because that pace usually means answers were pasted from a collected key. To remove any other score, type **Yes** in its **Hide from leaderboard** cell, or insert checkboxes in that column and tick them. A string of blank or very low Anonymous scores in a short time usually means someone is collecting answers.
+
+During a timed exam, the site counts each time the examinee leaves the exam page, by switching tab or window, minimizing, or closing it, and for how long. Blurs shorter than a second aren't counted. On return, a dialog shows the count so far. The totals are saved in the **Times left exam page** and **Seconds away** columns and shown with the result. Leaving 3 times, or for more than 60 seconds in total, keeps the score off the leaderboard. The score is still graded and saved. These counts come from the browser, so they deter casual searching but can't stop a second device or a determined cheater.
 
 On the timed exam and its answer review, text selection, copying and the right-click menu are turned off. That stops casual copy-and-paste into a search, but not screenshots or retyping. The answer review reveals that attempt’s solutions after submission. For a higher-stakes assessment, consider delaying answer release, adding rate limits or access codes, and recording answers server-side before the deadline.
 

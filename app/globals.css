@@ -243,6 +243,10 @@ progress::-moz-progress-bar { background: var(--graphite); }
 .exam-status .exam-progress { margin-bottom: 0; }
 .questions-toggle, .mobile-submit { display: none; }
 .save-warning { margin: 0 0 12px; color: var(--warning); font-size: 14px; }
+.away-status { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+.away-status svg { flex: none; }
+.away-flagged { color: var(--warning); font-weight: 600; }
+.result-hero .away-status { margin: 8px 0 0; }
 
 .question-panel, .navigator, .review-panel, .breakdown { padding: 24px; }
 .no-copy { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }

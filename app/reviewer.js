@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowLeft, ArrowRight, ArrowUpRight, Bookmark, Github, RotateCcw } from "lucide-react";
-import { clockLabel, CSC_GUIDE, durationLabel, LEVELS, makeStudy, MIN_SECONDS_PER_ITEM, QUICK_MODE, SECTIONS, weakestSection } from "../lib/exam.js";
+import { ArrowLeft, ArrowRight, ArrowUpRight, Bookmark, EyeOff, Github, RotateCcw } from "lucide-react";
+import {
+  AWAY_LEAVE_LIMIT, AWAY_SECONDS_LIMIT, awayFlagged, clockLabel, closeAway, CSC_GUIDE, durationLabel, LEVELS, makeStudy,
+  MIN_SECONDS_PER_ITEM, QUICK_MODE, SECTIONS, summarizeAway, weakestSection,
+} from "../lib/exam.js";
 import { requestExam, scoreStorageReady } from "../lib/scores.js";
 import { clearDraft, createDraft, readDraft, readHistory, readRecentQuestionIds, recordScore, saveProgress } from "../lib/practice-storage.js";
 import ScoreHistory from "./score-history.js";
@@ -213,6 +216,8 @@ function Exam({ attempt, onFinish, onQuit, submitting, submitError }) {
   // Answers lock once a submission is pending, including after a reload mid-submit.
   const [locked, setLocked] = useState(Boolean(attempt.progress.submission));
   const [confirmation, setConfirmation] = useState("");
+  const [awayNotice, setAwayNotice] = useState(null);
+  const latestProgress = useRef(progress);
   const submission = useRef(attempt.progress.submission
     ? { ...attempt.progress.submission, answers: attempt.progress.answers }
     : null);
@@ -232,20 +237,25 @@ function Exam({ attempt, onFinish, onQuit, submitting, submitError }) {
     };
   }, [deadline]);
 
+  // Every progress change goes through here so the away listeners always see the latest state.
+  const commitProgress = useCallback((next) => {
+    latestProgress.current = next;
+    setProgress(next);
+    setSaved(saveProgress(attempt.id, next));
+  }, [attempt.id]);
+
   const finish = useCallback((timedOut = false) => {
     if (submitting) return;
     if (!submission.current) {
-      const status = { timedOut: timedOut || Date.now() >= deadline };
+      const status = { timedOut: timedOut || Date.now() >= deadline, away: summarizeAway(latestProgress.current.away) };
       submission.current = { ...status, answers };
       setLocked(true);
-      const pending = { ...progress, submission: status };
-      setProgress(pending);
-      setSaved(saveProgress(attempt.id, pending));
+      commitProgress({ ...latestProgress.current, submission: status });
     }
     submissionStarted.current = true;
     setConfirmation("");
     onFinish(submission.current);
-  }, [answers, attempt.id, deadline, onFinish, progress, submitting]);
+  }, [answers, commitProgress, deadline, onFinish, submitting]);
 
   useEffect(() => {
     if (!submissionStarted.current && (remaining <= 0 || submission.current)) finish(remaining <= 0);
@@ -270,10 +280,39 @@ function Exam({ attempt, onFinish, onQuit, submitting, submitError }) {
   }, [saved]);
 
   function updateProgress(changes) {
-    const next = { ...progress, ...changes };
-    setProgress(next);
-    setSaved(saveProgress(attempt.id, next));
+    commitProgress({ ...latestProgress.current, ...changes });
   }
+
+  // Counts each time the examinee switches tab or window, minimizes, or closes the page, and
+  // for how long. The open absence is saved with the draft, so closing the tab still counts.
+  useEffect(() => {
+    if (locked) return;
+    function leave() {
+      const current = latestProgress.current;
+      if (Number.isFinite(current.away?.since)) return;
+      commitProgress({ ...current, away: { leaves: current.away?.leaves ?? 0, ms: current.away?.ms ?? 0, since: Date.now() } });
+    }
+    function comeBack() {
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      const current = latestProgress.current;
+      if (!Number.isFinite(current.away?.since)) return;
+      const away = closeAway(current.away);
+      commitProgress({ ...current, away });
+      if (away.leaves > (current.away.leaves ?? 0)) setAwayNotice(summarizeAway(away));
+    }
+    const changeVisibility = () => (document.visibilityState === "hidden" ? leave() : comeBack());
+    comeBack();
+    window.addEventListener("blur", leave);
+    window.addEventListener("focus", comeBack);
+    document.addEventListener("visibilitychange", changeVisibility);
+    return () => {
+      window.removeEventListener("blur", leave);
+      window.removeEventListener("focus", comeBack);
+      document.removeEventListener("visibilitychange", changeVisibility);
+    };
+  }, [locked, commitProgress]);
+
+  const awaySoFar = summarizeAway({ ...progress.away, since: null });
 
   function goTo(index) {
     updateProgress({ position: index });
@@ -337,6 +376,10 @@ function Exam({ attempt, onFinish, onQuit, submitting, submitError }) {
         <progress className="exam-progress" value={answeredCount} max={questions.length} aria-label="Questions answered" />
       </div>
       {!saved && <p className="save-warning" role="status">This attempt could not be saved on this device. Keep this tab open to finish it.</p>}
+      {awaySoFar.leaves > 0 && <p className={awayFlagged(awaySoFar) ? "away-status away-flagged" : "away-status"}>
+        <EyeOff size={15} aria-hidden="true" /> {awayLabel(awaySoFar)}
+        {awayFlagged(awaySoFar) ? ". This score won’t appear in Top scores." : "."}
+      </p>}
       {submitError && <div className="save-warning" role="alert">{submitError}{" "}
         <button className="text-button" type="button" onClick={() => finish()}>Retry submission</button>
       </div>}
@@ -390,11 +433,42 @@ function Exam({ attempt, onFinish, onQuit, submitting, submitError }) {
           <button className="button secondary navigator-submit" type="button" onClick={() => setConfirmation("submit")}>Submit exam</button>
         </aside>
       </div>
-      {submitting ? <SubmissionLoader /> : confirmation && (
+      {submitting ? <SubmissionLoader /> : awayNotice ? <AwayNotice away={awayNotice} onClose={() => setAwayNotice(null)} /> : confirmation && (
         <Confirmation kind={confirmation} unanswered={questions.length - answeredCount} markedCount={markedIndexes.length} saved={saved}
           onClose={() => setConfirmation("")} onConfirm={confirmation === "submit" ? () => finish() : onQuit} />
       )}
     </>
+  );
+}
+
+function awayCount({ leaves, awaySeconds }) {
+  const minutes = Math.floor(awaySeconds / 60);
+  const seconds = awaySeconds % 60;
+  const duration = minutes ? `${minutes} min${seconds ? ` ${seconds} sec` : ""}` : `${seconds} sec`;
+  return `${leaves} ${leaves === 1 ? "time" : "times"}, ${duration} in total`;
+}
+
+function awayLabel(away) {
+  return `You left the exam page ${awayCount(away)}`;
+}
+
+function AwayNotice({ away, onClose }) {
+  const dialog = useRef(null);
+  useEffect(() => {
+    const element = dialog.current;
+    element.showModal();
+    return () => element.close();
+  }, []);
+  const flagged = awayFlagged(away);
+  return (
+    <dialog className="confirmation away-notice" ref={dialog} onCancel={onClose} aria-labelledby="away-title">
+      <h2 id="away-title">You left the exam page</h2>
+      <p>So far: {awayCount(away)}. The timer keeps running while you’re away.</p>
+      <p className={flagged ? "confirm-marked" : undefined}>{flagged
+        ? "This score won’t appear in Top scores. It will still be graded and saved."
+        : `Leaving ${AWAY_LEAVE_LIMIT} times, or for more than ${AWAY_SECONDS_LIMIT} seconds in total, keeps the score off Top scores.`}</p>
+      <div className="question-actions"><button type="button" autoFocus className="button primary" onClick={onClose}>Back to the exam</button></div>
+    </dialog>
   );
 }
 
@@ -468,7 +542,10 @@ function Results({ attempt, result, reset, beginStudy, savedLocally }) {
           <p className="save-status" role="status">Your score was recorded.{scoreStorageReady && <> <a href="#leaderboard">See the top scores</a>.</>}</p>
           {result.late
             ? <p className="save-warning">This exam was submitted after its time limit, so the score won’t appear in Top scores.</p>
-            : result.tooFast && <p className="save-warning">This exam was finished in less than {Math.ceil(result.total * MIN_SECONDS_PER_ITEM / 60)} minutes, so the score won’t appear in Top scores.</p>}
+            : result.tooFast ? <p className="save-warning">This exam was finished in less than {Math.ceil(result.total * MIN_SECONDS_PER_ITEM / 60)} minutes, so the score won’t appear in Top scores.</p>
+              : result.awayFlagged && <p className="save-warning">{awayLabel(result.away)}, so the score won’t appear in Top scores.</p>}
+          {result.away?.leaves > 0 && !(result.awayFlagged && !result.late && !result.tooFast) &&
+            <p className="away-status"><EyeOff size={15} aria-hidden="true" /> {awayLabel(result.away)}.</p>}
           {!savedLocally && <p className="save-warning">This browser couldn’t add the score to your history on this device.</p>}
         </div>
         <div className="score-number"><strong>{result.percentage}%</strong></div>
@@ -588,7 +665,7 @@ export default function Reviewer() {
     return recorded.saved;
   }
 
-  async function finish({ answers, timedOut }) {
+  async function finish({ answers, timedOut, away = { leaves: 0, awaySeconds: 0 } }) {
     if (submitting) return;
     const request = {};
     activeRequest.current = request;
@@ -596,7 +673,7 @@ export default function Reviewer() {
     setSubmitError("");
     try {
       const { solutions, ...score } = await requestExam({
-        action: "submit", ticket: attempt.ticket, name: attempt.name, publishName: attempt.publishName, answers,
+        action: "submit", ticket: attempt.ticket, name: attempt.name, publishName: attempt.publishName, answers, away,
       });
       if (activeRequest.current !== request) return;
       const completed = { ...score, answers, timedOut };
