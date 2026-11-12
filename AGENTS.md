@@ -8,9 +8,9 @@
 
 ## Development
 
-- Use Node.js 22. Run `npm ci`, `npm run dev`, `npm test`, and `npm run build`. Netlify serves `out/`.
+- Use Node.js 22. Run `npm ci`, `npm run dev`, `npm run lint`, `npm test`, and `npm run build`. Netlify serves `out/`.
 - The interface lives in `app/reviewer.js` and `app/globals.css`. Exam rules and content live in `lib/exam.js` and `lib/questions/`.
-- If you change exam lengths, durations, or score fields, update both the frontend and `google-apps-script/Code.gs`.
+- If you change exam lengths, durations, score fields, or leaderboard limits (`MIN_SECONDS_PER_ITEM`, `AWAY_LEAVE_LIMIT`, `AWAY_SECONDS_LIMIT`), update both the frontend and `google-apps-script/Code.gs`.
 - Use original questions with authoritative references for factual explanations. Exclude leaked exam items. Section allocations and percentages are practice metrics.
 - Keep the timed answer bank in the private Apps Script project. The browser receives timed solutions only after a completed score write. Study Mode uses the separate public bank.
 - Save the active timed exam and the last 30 score summaries in browser storage without names. Keep Study Mode answers in memory. Treat the score endpoint as public and the destination Sheet as private.
