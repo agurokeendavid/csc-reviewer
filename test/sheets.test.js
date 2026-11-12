@@ -24,12 +24,15 @@ function mockAppsScript() {
     getLastRow: () => rows.length,
     setFrozenRows: () => {},
     setColumnWidth: () => {},
-    getRange: (row, column) => ({
+    getRange: (row, column, height = 1, width = 1) => ({
       setBackground() { return this; },
       setFontColor() { return this; },
       setFontWeight() { return this; },
-      getValues: () => [rows[row - 1]],
-      getValue: () => rows[row - 1][column - 1],
+      getValues: () => rows.slice(row - 1, row - 1 + height).map((values) =>
+        values.slice(column - 1, column - 1 + width).map((value, index) =>
+          column + index === 10 && typeof value === "string" ? value.replace(/^'/, "") : value)),
+      getValue: () => rows[row - 1][column - 1] ?? "",
+      setValue(value) { rows[row - 1][column - 1] = value; return this; },
       setNote: (note) => notes.set(row, note),
       createTextFinder: (value) => ({
         matchEntireCell() { return this; },
@@ -247,4 +250,38 @@ test("name remains optional and formula-like values are stored as text", () => {
   assert.equal(send(app, { action: "submit", ticket: second.ticket, answers: {}, name: "=SUM(1,2)" }).ok, true);
   assert.equal(rows[1][2], "Anonymous");
   assert.equal(rows[2][2], "'=SUM(1,2)");
+});
+
+test("leaderboard returns the top five for one format without exposing private names or attempt data", () => {
+  const { app, rows } = mockAppsScript();
+  rows.push(
+    ["id-a", new Date(), "Private A", "Professional", "Quick practice", 12, 20, 60, 100],
+    ["id-b", new Date(), "Private B", "Professional", "Quick practice", 17, 20, 85, 110, "'Shared alias"],
+    ["id-c", new Date(), "Private C", "Professional", "Quick practice", 18, 20, 90, 120],
+    ["id-d", new Date(), "Private D", "Professional", "Quick practice", 13, 20, 65, 130],
+    ["id-e", new Date(), "Private E", "Professional", "Quick practice", 14, 20, 70, 140],
+    ["id-f", new Date(), "Private F", "Professional", "Quick practice", 15, 20, 75, 150],
+    ["id-g", new Date(), "Other level", "Subprofessional", "Quick practice", 20, 20, 100, 150],
+    ["id-h", new Date(), "Other mode", "Professional", "Full mock exam", 150, 150, 100, 150],
+    ["id-i", new Date(), "Invalid total", "Professional", "Quick practice", 30, 30, 100, 150],
+  );
+  const result = sendJson(app, { action: "leaderboard", level: "professional", mode: "quick" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data.scores.map(({ correct }) => correct), [18, 17, 15, 14, 13]);
+  assert.deepEqual(result.data.scores.map(({ displayName }) => displayName),
+    ["Anonymous", "Shared alias", "Anonymous", "Anonymous", "Anonymous"]);
+  for (const item of result.data.scores) assert.deepEqual(Object.keys(item).sort(), ["correct", "displayName", "percentage", "total"]);
+});
+
+test("only scores explicitly opting in get a public display name", () => {
+  const { app, rows } = mockAppsScript();
+  // Simulate a sheet created before the public-name column was introduced.
+  rows[0].pop();
+  const anonymous = start(app);
+  const visible = start(app);
+  assert.equal(sendJson(app, { action: "submit", ticket: anonymous.ticket, name: "Private name", answers: {} }).ok, true);
+  assert.equal(sendJson(app, { action: "submit", ticket: visible.ticket, name: "Public name", publishName: true, answers: {} }).ok, true);
+  assert.equal(rows[0][9], "Public display name");
+  const result = sendJson(app, { action: "leaderboard", level: "professional", mode: "quick" });
+  assert.deepEqual(result.data.scores.map(({ displayName }) => displayName), ["Anonymous", "Public name"]);
 });

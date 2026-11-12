@@ -6,6 +6,7 @@
 | `app/page.js` | Static entry point |
 | `app/reviewer.js` | Name and exam setup, timer, navigation, and results |
 | `app/study.js`, `app/score-history.js` | Topic drills, immediate feedback, and recent score comparisons |
+| `app/leaderboard.js` | Public top five scores by level and mode |
 | `app/globals.css` | Responsive layout and styling |
 | `lib/exam.js` | Exam rules, question selection, shuffling, and grading |
 | `lib/questions/` | Authored items and procedural variants |
@@ -23,7 +24,7 @@
 4. Apps Script verifies the ticket and grades the assigned questions. A script lock protects the score write. A keyed digest in the attempt ID cell’s note allows identical retries and rejects modified resubmissions.
 5. Apps Script returns the score and that attempt’s solutions after the Sheet write. Results highlight the lowest-scoring section and link to a study session. Local history keeps the last 30 summaries without names.
 
-The Sheet contains the attempt ID, timestamp, display name, exam level, mode, correct count, total, percentage, and elapsed seconds. The endpoint exposes no read API. The Sheet’s sharing settings govern access.
+The Sheet contains the attempt ID, timestamp, private name, exam level, mode, correct count, total, percentage, elapsed seconds, and a separate public display name for opted-in attempts. The leaderboard returns up to five scores per level and mode with only the optional public name and score figures. The Sheet’s sharing settings govern access to the rest of the row.
 
 Study Mode uses the separate public bank. It gives immediate feedback and saves the first completed round to local history. Apps Script caps reported elapsed time at the exam duration. Enforcing answer times against a modified browser would require server-side checkpoints.
 

@@ -14,13 +14,14 @@ test("timed drafts preserve question order, answers, flags, and deadline without
   t.after(() => { globalThis.window = originalWindow; });
 
   const questions = makeExam("professional", "quick");
-  const attempt = { id: "attempt-one", ticket: "signed-ticket", name: "Examinee name", level: "professional", mode: "quick", questions, start: 0, deadline: 1500000 };
+  const attempt = { id: "attempt-one", ticket: "signed-ticket", name: "Examinee name", publishName: true, level: "professional", mode: "quick", questions, start: 0, deadline: 1500000 };
   const first = questions[0];
   const progress = { answers: { [first.id]: first.correct }, marked: [first.id], position: 3 };
   assert.equal(createDraft(attempt), true);
   assert.equal(saveProgress(attempt.id, progress), true);
   const draft = readDraft();
   assert.equal(draft.name, undefined);
+  assert.equal(draft.publishName, undefined);
   assert.equal(draft.deadline, attempt.deadline);
   assert.deepEqual(draft.progress, progress);
   assert.deepEqual(draft.questions.map(({ id, options }) => ({ id, options })),

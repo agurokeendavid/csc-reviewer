@@ -7,6 +7,7 @@ An unofficial Philippine Civil Service Exam reviewer with timed Professional and
 - Full-length mocks based on the 2026 Career Service Examination, Pen and Paper Test (CSE-PPT), plus a 20-question quick practice mode.
 - Separate banks of original timed-exam and study questions, including English and Filipino verbal items.
 - A countdown timer, question navigator, and review flags. After submission, examinees can see their answers, explanations, and scores by section.
+- A public leaderboard with the top five timed scores per exam level and mode. Examinees can opt in to show their name.
 - An optional name field. When Google Sheets is connected, completed attempts with a blank name appear in the organizer's private sheet as **Anonymous**.
 - Untimed Study Mode by subject or topic, with immediate explanations and a retry round for missed questions.
 - Resume a timed exam after a refresh or after closing the tab. The timer uses the original deadline.
@@ -42,6 +43,8 @@ Open [localhost:3000](http://localhost:3000). Study Mode works before you connec
 6. In a private browser window, submit a quick attempt with the name blank. Confirm that the app displays **Saved to Google Sheets** and that the sheet contains one matching row with **Anonymous** in the Name column.
 
 The start response contains question text, shuffled choices, and a signed ticket. Apps Script checks the ticket, grades the assigned questions, and returns explanations after saving the score. Identical retries reuse the original score row. The web app accepts anonymous submissions, and the Sheet’s sharing settings control who can read names and scores.
+
+The public leaderboard includes existing scores as Anonymous. Names appear only when an examinee opts in for that attempt. Run `setup` after updating the script to add the optional **Public display name** column to the existing Scores sheet.
 
 Deploy the updated `Code.gs` to enable direct JSON requests on the existing `/exec` URL. The reviewer uses the older iframe connection when an earlier Apps Script deployment explicitly requires an iframe receipt. Browser permissions warnings can appear while that connection is in use.
 

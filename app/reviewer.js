@@ -10,6 +10,7 @@ import { clockLabel, CSC_GUIDE, durationLabel, LEVELS, makeStudy, QUICK_MODE, SE
 import { requestExam, scoreStorageReady } from "../lib/scores.js";
 import { clearDraft, createDraft, readDraft, readHistory, readRecentQuestionIds, recordScore, saveProgress } from "../lib/practice-storage.js";
 import ScoreHistory from "./score-history.js";
+import Leaderboard from "./leaderboard.js";
 import { StudySession, StudySetup } from "./study.js";
 
 const COVERAGE = {
@@ -20,8 +21,20 @@ const COVERAGE = {
   general: [Landmark, "Constitution, public ethics, human rights, and the environment"],
 };
 
+function PublicNameOption({ name, checked, onChange }) {
+  const hasName = Boolean(name.trim());
+  return (
+    <label className="publish-name">
+      <input type="checkbox" checked={hasName && checked} disabled={!hasName}
+        onChange={(event) => onChange(event.target.checked)} />
+      Show my name publicly if my score makes the Top 5
+    </label>
+  );
+}
+
 function ResumeCard({ draft, resume, discard }) {
   const [name, setName] = useState("");
+  const [publishName, setPublishName] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const count = Object.keys(draft.progress.answers).length;
   const label = draft.mode === "full" ? "Full mock exam" : "Quick practice";
@@ -31,15 +44,19 @@ function ResumeCard({ draft, resume, discard }) {
         <div><h2 id="resume-title">Continue your timed exam</h2>
           <p className="section-intro">{LEVELS[draft.level].label} · {label} · {count} of {draft.questions.length} answered</p></div>
       </div>
-      <form onSubmit={(event) => { event.preventDefault(); resume(draft, name.trim() || "Anonymous"); }}>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        resume(draft, name.trim() || "Anonymous", Boolean(name.trim()) && publishName);
+      }}>
         <label className="field-label" htmlFor="resume-name">Name for your score (optional)</label>
         <div className="resume-actions">
           <input className="study-select" id="resume-name" value={name} maxLength={80}
             pattern="\s*(?:\S.*\S)?\s*" autoComplete="off" placeholder="Leave blank for Anonymous"
-            onChange={(event) => setName(event.target.value)} />
+            onChange={(event) => { setName(event.target.value); setPublishName(false); }} />
           <button className="button primary" type="submit">Resume exam <ArrowRight size={17} /></button>
           <button className="text-button" type="button" onClick={() => setConfirmDiscard(true)}>Discard exam</button>
         </div>
+        <PublicNameOption name={name} checked={publishName} onChange={setPublishName} />
         <p className="privacy">The original timer keeps running. If time has expired, resuming opens your results.</p>
       </form>
       {confirmDiscard && <Confirmation kind="discard" onClose={() => setConfirmDiscard(false)} onConfirm={() => discard(draft.id)} />}
@@ -50,6 +67,7 @@ function ResumeCard({ draft, resume, discard }) {
 function Setup({ begin, beginStudy, draft, resume, discard, ready, opening, startError }) {
   const [path, setPath] = useState(scoreStorageReady ? "timed" : "study");
   const [name, setName] = useState("");
+  const [publishName, setPublishName] = useState(false);
   const [level, setLevel] = useState("professional");
   const [mode, setMode] = useState("full");
   const [error, setError] = useState("");
@@ -63,7 +81,7 @@ function Setup({ begin, beginStudy, draft, resume, discard, ready, opening, star
       setError("Enter a name with at least two characters, or leave it blank.");
       return;
     }
-    begin(displayName || "Anonymous", level, mode);
+    begin(displayName || "Anonymous", level, mode, Boolean(displayName) && publishName);
   }
 
   return (
@@ -109,9 +127,10 @@ function Setup({ begin, beginStudy, draft, resume, discard, ready, opening, star
               id="name" name="name" value={name} maxLength={80} autoComplete="off"
               placeholder="Leave blank to take the exam anonymously" aria-describedby={error ? "name-error" : undefined}
               aria-invalid={error ? true : undefined}
-              onChange={(event) => { setName(event.target.value); setError(""); }}
+              onChange={(event) => { setName(event.target.value); setPublishName(false); setError(""); }}
             /></div>
             {error && <p className="form-error" id="name-error" role="alert">{error}</p>}
+            <PublicNameOption name={name} checked={publishName} onChange={setPublishName} />
             <fieldset>
               <legend>Exam level</legend>
               <div className="choices">
@@ -339,7 +358,7 @@ function SubmissionLoader() {
   return (
     <dialog className="confirmation submission-loader" ref={dialog}
       onCancel={(event) => event.preventDefault()} aria-labelledby="submission-title">
-      <div className="submission-spinner" aria-hidden="true" />
+      <div className="submission-spinner" aria-hidden="true"><span /></div>
       <h2 id="submission-title">Submitting your exam</h2>
       <p role="status">Grading your answers and saving your score…</p>
     </dialog>
@@ -390,6 +409,7 @@ function Results({ attempt, result, reset, beginStudy, savedLocally }) {
         </div>
         <div className="score-number"><strong>{result.percentage}%</strong><small>Practice score</small></div>
       </section>
+      <a className="text-button result-leaderboard-link" href="#leaderboard">View top scores <ArrowDownRight size={15} /></a>
       <div className="session-grid results-grid">
         <section className="panel review-panel" aria-labelledby="review-heading">
           <div className="review-heading">
@@ -428,6 +448,7 @@ function Results({ attempt, result, reset, beginStudy, savedLocally }) {
           <button className="button secondary" type="button" onClick={reset}><RotateCcw size={17} /> New practice</button>
         </aside>
       </div>
+      {scoreStorageReady && <Leaderboard initialLevel={attempt.level} initialMode={attempt.mode} />}
     </>
   );
 }
@@ -456,7 +477,7 @@ export default function Reviewer() {
     return () => window.removeEventListener("storage", sync);
   }, []);
 
-  async function begin(name, level, mode) {
+  async function begin(name, level, mode, publishName) {
     const existing = readDraft();
     if (existing) { setDraft(existing); return; }
     const request = {};
@@ -466,7 +487,7 @@ export default function Reviewer() {
     try {
       const exam = await requestExam({ action: "begin", level, mode, recentQuestionIds: readRecentQuestionIds() });
       if (activeRequest.current !== request) return;
-      const next = { ...exam, name, level, mode };
+      const next = { ...exam, name, level, mode, publishName };
       const saved = createDraft(next);
       setAttempt({ ...next, saved, progress: { answers: {}, marked: [], position: 0 } });
       window.scrollTo(0, 0);
@@ -477,10 +498,10 @@ export default function Reviewer() {
     }
   }
 
-  function resume(saved, name) {
+  function resume(saved, name, publishName) {
     const current = readDraft();
     if (current?.id !== saved.id) { setDraft(current); return; }
-    setAttempt({ ...current, saved: true, name });
+    setAttempt({ ...current, saved: true, name, publishName });
     window.scrollTo(0, 0);
   }
 
@@ -510,7 +531,9 @@ export default function Reviewer() {
     setSubmitting(true);
     setSubmitError("");
     try {
-      const { solutions, ...score } = await requestExam({ action: "submit", ticket: attempt.ticket, name: attempt.name, answers });
+      const { solutions, ...score } = await requestExam({
+        action: "submit", ticket: attempt.ticket, name: attempt.name, publishName: attempt.publishName, answers,
+      });
       if (activeRequest.current !== request) return;
       const completed = { ...score, answers, timedOut };
       setSavedLocally(addHistory(completed));
@@ -552,12 +575,16 @@ export default function Reviewer() {
         </a>
         {attempt
           ? <span className="header-link"><span className="status-dot" /> {result ? "Practice complete" : "Practice in progress"}</span>
-          : <a className="header-link" href="#history">Score history <ArrowDownRight size={15} /></a>}
+          : <nav className="header-nav" aria-label="Scores">
+            {scoreStorageReady && <a className="header-link" href="#leaderboard">Top scores</a>}
+            <a className="header-link" href="#history">Score history <ArrowDownRight size={15} /></a>
+          </nav>}
       </div></header>
       <main className="shell">
         {!attempt && <>
           <Setup begin={begin} beginStudy={beginStudy} draft={draft} resume={resume} discard={discard}
             ready={ready} opening={opening} startError={startError} />
+          {scoreStorageReady && <Leaderboard />}
           <ScoreHistory entries={history} ready={ready} />
         </>}
         {attempt?.mode === "study" && <StudySession key={attempt.id} attempt={attempt} onComplete={addHistory} onExit={reset} />}

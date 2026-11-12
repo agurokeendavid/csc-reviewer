@@ -3,6 +3,8 @@ const SCORE_HEADERS = [
   "Attempt ID", "Submitted at", "Name", "Level", "Mode",
   "Correct", "Total", "Percent", "Elapsed seconds",
 ];
+const PUBLIC_NAME_COLUMN = SCORE_HEADERS.length + 1;
+const PUBLIC_NAME_HEADER = "Public display name";
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const ORIGIN_PATTERN = /^(https:\/\/[a-z0-9.-]+(?::\d+)?|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?)$/i;
 const EXAM_FORMATS = {
@@ -29,6 +31,7 @@ function setup() {
   } else if (sheet.getRange(1, 1, 1, SCORE_HEADERS.length).getValues()[0].join("|") !== SCORE_HEADERS.join("|")) {
     throw new Error("The Scores tab already has different headers. Rename that tab before running setup.");
   }
+  ensurePublicNameColumn_(sheet);
   const properties = PropertiesService.getScriptProperties();
   properties.setProperty("SCORE_SPREADSHEET_ID", spreadsheet.getId());
   if (!properties.getProperty(SIGNING_KEY_PROPERTY)) {
@@ -64,6 +67,7 @@ function doPost(event) {
   try {
     if (submission.action === "begin") result = { ok: true, data: beginExam_(submission) };
     else if (submission.action === "submit") result = { ok: true, data: submitExam_(submission) };
+    else if (submission.action === "leaderboard") result = { ok: true, data: readLeaderboard_(submission) };
     else result = { ok: false, message: "Unsupported exam request." };
   } catch (error) {
     if (!error.publicMessage) console.error("Timed exam request failed.");
@@ -225,18 +229,62 @@ function submitExam_(request) {
   const elapsedSeconds = Math.max(0, Math.floor((Math.min(Date.now(), attempt.deadline) - attempt.start) / 1000));
   const percentage = Math.round(10000 * correct / total) / 100;
   const digest = signExam_(JSON.stringify(canonicalAnswers));
-  const elapsed = appendScore_({ ...attempt, name, correct, total, percentage, elapsedSeconds }, digest);
+  const publishName = request.publishName === true && name !== "Anonymous";
+  const elapsed = appendScore_({ ...attempt, name, correct, total, percentage, elapsedSeconds, publishName }, digest);
   return { correct, answered, total, percentage, sections, elapsedSeconds: elapsed, solutions };
+}
+
+function openScoreSheet_() {
+  const spreadsheetId = PropertiesService.getScriptProperties().getProperty("SCORE_SPREADSHEET_ID");
+  if (!spreadsheetId) throw new Error("Run setup before deploying.");
+  const sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName(SCORE_TAB);
+  if (!sheet) throw new Error("Scores tab is missing.");
+  return sheet;
+}
+
+function ensurePublicNameColumn_(sheet) {
+  const header = sheet.getRange(1, PUBLIC_NAME_COLUMN);
+  const value = header.getValue();
+  if (value === PUBLIC_NAME_HEADER) return;
+  if (value) throw new Error("The public display name column is already in use.");
+  header.setValue(PUBLIC_NAME_HEADER).setBackground("#143b30").setFontColor("#ffffff").setFontWeight("bold");
+  sheet.setColumnWidth(PUBLIC_NAME_COLUMN, 180);
+}
+
+function readLeaderboard_(request) {
+  const { level, mode } = request;
+  if ((level !== "professional" && level !== "subprofessional") || (mode !== "full" && mode !== "quick")) {
+    invalidExam_("Choose a valid leaderboard format.");
+  }
+
+  const sheet = openScoreSheet_();
+  const rowCount = sheet.getLastRow() - 1;
+  if (rowCount < 1) return { scores: [] };
+  const hasPublicNames = sheet.getRange(1, PUBLIC_NAME_COLUMN).getValue() === PUBLIC_NAME_HEADER;
+  const levelLabel = level === "professional" ? "Professional" : "Subprofessional";
+  const modeLabel = mode === "quick" ? "Quick practice" : "Full mock exam";
+  const expectedTotal = mode === "quick" ? 20 : Object.values(EXAM_FORMATS[level].sections).reduce((sum, size) => sum + size, 0);
+  // Start at column D so private names and attempt IDs never enter the leaderboard data.
+  const rows = sheet.getRange(2, 4, rowCount, hasPublicNames ? 7 : 6).getValues();
+  const scores = rows
+    .filter(([rowLevel, rowMode, correct, total]) => rowLevel === levelLabel && rowMode === modeLabel &&
+      total === expectedTotal && Number.isInteger(correct) && correct >= 0 && correct <= total)
+    .map(([, , correct, total, , , publicName]) => ({
+      displayName: typeof publicName === "string" && publicName.trim() ? publicName.trim().slice(0, 80) : "Anonymous",
+      correct,
+      total,
+      percentage: Math.round(10000 * correct / total) / 100,
+    }))
+    .sort((first, second) => second.correct - first.correct)
+    .slice(0, 5);
+  return { scores };
 }
 
 function appendScore_(score, digest) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const spreadsheetId = PropertiesService.getScriptProperties().getProperty("SCORE_SPREADSHEET_ID");
-    if (!spreadsheetId) throw new Error("Run setup before deploying.");
-    const sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName(SCORE_TAB);
-    if (!sheet) throw new Error("Scores tab is missing.");
+    const sheet = openScoreSheet_();
 
     const lastRow = sheet.getLastRow();
     const previous = lastRow > 1 && sheet.getRange(2, 1, lastRow - 1, 1)
@@ -246,11 +294,13 @@ function appendScore_(score, digest) {
       return sheet.getRange(previous.getRow(), 9).getValue();
     }
 
+    if (score.publishName) ensurePublicNameColumn_(sheet);
     const safeName = /^[=+\-@]/.test(score.name) ? "'" + score.name : score.name;
     sheet.appendRow([
       score.id, new Date(), safeName, score.level === "professional" ? "Professional" : "Subprofessional",
       score.mode === "quick" ? "Quick practice" : "Full mock exam", score.correct, score.total,
       score.percentage, score.elapsedSeconds,
+      score.publishName ? "'" + score.name : "",
     ]);
     sheet.getRange(sheet.getLastRow(), 1).setNote(digest);
     SpreadsheetApp.flush();
