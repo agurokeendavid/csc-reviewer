@@ -9,6 +9,7 @@ An unofficial Philippine Civil Service Exam reviewer with timed Professional and
 - A countdown timer, question navigator, and review flags. After submission, examinees can see their answers, explanations, and scores by section.
 - A public leaderboard with the top five timed scores per exam level and mode. Examinees can opt in to show their name.
 - An optional name field. When Google Sheets is connected, completed attempts with a blank name appear in the organizer's private sheet as **Anonymous**.
+- A References menu for the exam scope and question sources, and anonymous feedback saved to the organizer's private **Feedback** tab.
 - Untimed Study Mode by subject or topic, with immediate explanations and a retry round for missed questions.
 - Resume a timed exam after a refresh or after closing the tab. The timer uses the original deadline.
 - Score history on this device, with changes by subject compared to the previous attempt in the same format.

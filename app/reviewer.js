@@ -11,6 +11,7 @@ import { requestExam, scoreStorageReady } from "../lib/scores.js";
 import { clearDraft, createDraft, readDraft, readHistory, readRecentQuestionIds, recordScore, saveProgress } from "../lib/practice-storage.js";
 import ScoreHistory from "./score-history.js";
 import Leaderboard from "./leaderboard.js";
+import SiteResources from "./site-resources.js";
 import { StudySession, StudySetup } from "./study.js";
 
 const COVERAGE = {
@@ -577,11 +578,16 @@ export default function Reviewer() {
         <a className="brand" href="/" aria-label="CSC Reviewer PH home" onClick={goHome}>
           <span><BookOpen size={21} strokeWidth={2.3} aria-hidden="true" /></span> CSC Reviewer <b>PH</b>
         </a>
-        {attempt
-          ? <span className="header-link"><span className="status-dot" /> {result ? "Practice complete" : "Practice in progress"}</span>
-          : <nav className="header-nav" aria-label="Scores">
-            {scoreStorageReady && <a className="header-link" href="#leaderboard">Top scores</a>}
-            <a className="header-link" href="#history">Score history <ArrowDownRight size={15} /></a>
+        {attempt && !result
+          ? <span className="header-link"><span className="status-dot" /> Practice in progress</span>
+          : <nav className="header-nav" aria-label="Main navigation">
+            {result
+              ? <span className="header-link"><span className="status-dot" /> Practice complete</span>
+              : <>
+                {scoreStorageReady && <a className="header-link" href="#leaderboard">Top scores</a>}
+                <a className="header-link" href="#history">Score history <ArrowDownRight size={15} /></a>
+              </>}
+            <SiteResources />
           </nav>}
       </div></header>
       <main className="shell">

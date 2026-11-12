@@ -1,4 +1,6 @@
 const SCORE_TAB = "Scores";
+const FEEDBACK_TAB = "Feedback";
+const FEEDBACK_HEADERS = ["Feedback ID", "Submitted at", "Message"];
 const SCORE_HEADERS = [
   "Attempt ID", "Submitted at", "Name", "Level", "Mode",
   "Correct", "Total", "Percent", "Elapsed seconds",
@@ -70,10 +72,12 @@ function doPost(event) {
     if (submission.action === "begin") result = { ok: true, data: beginExam_(submission) };
     else if (submission.action === "submit") result = { ok: true, data: submitExam_(submission) };
     else if (submission.action === "leaderboard") result = { ok: true, data: readLeaderboard_(submission) };
+    else if (submission.action === "feedback") result = { ok: true, data: saveFeedback_(submission) };
     else result = { ok: false, message: "Unsupported exam request." };
   } catch (error) {
-    if (!error.publicMessage) console.error("Timed exam request failed.");
-    result = { ok: false, message: error.publicMessage || "The timed exam service is unavailable. Try again." };
+    const service = submission.action === "feedback" ? "Feedback" : "Timed exam";
+    if (!error.publicMessage) console.error(service + " request failed.");
+    result = { ok: false, message: error.publicMessage || service + " is unavailable. Try again." };
   }
 
   if (useJson) return jsonExamResponse_(result);
@@ -262,12 +266,49 @@ function submitExam_(request) {
   return { correct, answered, total, percentage, sections, elapsedSeconds: elapsed, solutions };
 }
 
-function openScoreSheet_() {
+function openScoreSpreadsheet_() {
   const spreadsheetId = PropertiesService.getScriptProperties().getProperty("SCORE_SPREADSHEET_ID");
   if (!spreadsheetId) throw new Error("Run setup before deploying.");
-  const sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName(SCORE_TAB);
+  return SpreadsheetApp.openById(spreadsheetId);
+}
+
+function openScoreSheet_() {
+  const sheet = openScoreSpreadsheet_().getSheetByName(SCORE_TAB);
   if (!sheet) throw new Error("Scores tab is missing.");
   return sheet;
+}
+
+function saveFeedback_(request) {
+  const { id } = request;
+  const message = typeof request.message === "string" ? request.message.trim() : "";
+  if (typeof id !== "string" || !UUID_PATTERN.test(id) || !message || message.length > 2000) {
+    invalidExam_("Enter feedback of up to 2,000 characters.");
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const spreadsheet = openScoreSpreadsheet_();
+    const sheet = spreadsheet.getSheetByName(FEEDBACK_TAB) || spreadsheet.insertSheet(FEEDBACK_TAB);
+    const lastRow = sheet.getLastRow();
+    if (lastRow === 0) {
+      sheet.appendRow(FEEDBACK_HEADERS);
+      sheet.setFrozenRows(1);
+    } else if (sheet.getRange(1, 1, 1, FEEDBACK_HEADERS.length).getValues()[0].join("|") !== FEEDBACK_HEADERS.join("|")) {
+      throw new Error("The Feedback tab already has different headers.");
+    }
+
+    const previous = lastRow > 1 && sheet.getRange(2, 1, lastRow - 1, 1)
+      .createTextFinder(id).matchEntireCell(true).findNext();
+    if (!previous) {
+      // The leading apostrophe makes Sheets store visitor input as text.
+      sheet.appendRow([id, new Date(), "'" + message]);
+      SpreadsheetApp.flush();
+    }
+    return { saved: true };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function ensurePublicNameColumn_(sheet) {

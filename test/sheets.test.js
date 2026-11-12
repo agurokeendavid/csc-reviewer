@@ -20,13 +20,9 @@ function buildFixtureBank(day) {
   };
 }
 
-function mockAppsScript(random = Math.random) {
-  const rows = [];
+function mockSheet(rows) {
   const notes = new Map();
-  const properties = new Map();
-  let locked = false;
-  let now = testTime;
-  const sheet = {
+  return {
     appendRow: (values) => rows.push(values),
     getLastRow: () => rows.length,
     setFrozenRows: () => {},
@@ -50,7 +46,26 @@ function mockAppsScript(random = Math.random) {
       }),
     }),
   };
-  const spreadsheet = { getSheetByName: () => sheet, getId: () => "test-spreadsheet" };
+}
+
+function mockAppsScript(random = Math.random) {
+  const rows = [];
+  const feedbackRows = [];
+  const sheets = new Map([["Scores", mockSheet(rows)]]);
+  const properties = new Map();
+  let locked = false;
+  let now = testTime;
+  const spreadsheet = {
+    getSheetByName: (name) => sheets.get(name) ?? null,
+    insertSheet(name) {
+      assert.equal(sheets.has(name), false);
+      assert.equal(name, "Feedback");
+      const sheet = mockSheet(feedbackRows);
+      sheets.set(name, sheet);
+      return sheet;
+    },
+    getId: () => "test-spreadsheet",
+  };
   const globals = {
     Date: class extends Date { static now() { return now; } },
     Math: Object.assign(Object.create(Math), { random }),
@@ -97,7 +112,7 @@ function mockAppsScript(random = Math.random) {
   })`, globals);
   app.setup();
   app.setup();
-  return { app, rows, setTime: (time) => { now = time; } };
+  return { app, rows, feedbackRows, setTime: (time) => { now = time; } };
 }
 
 function send(app, fields) {
@@ -121,6 +136,23 @@ function sendJson(app, fields) {
   assert.equal(response.mimeType, "application/json");
   return JSON.parse(response.content);
 }
+
+test("feedback validates messages and stores anonymous retries once in a separate tab", () => {
+  const { app, rows, feedbackRows } = mockAppsScript();
+  const request = { action: "feedback", id: randomUUID(), message: "  =1+1\nMore practice sets, please.  " };
+  for (const fields of [{ id: "invalid" }, { message: " " }, { message: "a".repeat(2001) }]) {
+    assert.equal(sendJson(app, { ...request, ...fields }).ok, false);
+  }
+  assert.equal(feedbackRows.length, 0);
+  assert.deepEqual(sendJson(app, request), { ok: true, data: { saved: true } });
+  assert.deepEqual(sendJson(app, request), { ok: true, data: { saved: true } });
+  assert.equal(feedbackRows.length, 2);
+  assert.deepEqual(Array.from(feedbackRows[0]), ["Feedback ID", "Submitted at", "Message"]);
+  assert.equal(feedbackRows[1][0], request.id);
+  assert.ok(Number.isFinite(feedbackRows[1][1].getTime()));
+  assert.equal(feedbackRows[1][2], "'=1+1\nMore practice sets, please.");
+  assert.equal(rows.length, 1);
+});
 
 test("the JSON transport can start and submit an exam without an iframe receipt", () => {
   const { app, rows } = mockAppsScript();
