@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BANK, clockLabel, grade, LEVELS, makeExam, QUICK_MODE } from "../lib/exam.js";
+import { BANK, clockLabel, countdownLabel, grade, LEVELS, makeExam, nextQuestionRefresh, QUICK_MODE } from "../lib/exam.js";
 
 function seededRandom(seed) {
   return () => {
@@ -51,4 +51,19 @@ test("grading treats blank answers as incorrect and reports each section", () =>
   assert.deepEqual(result.sections.analytical, { correct: 0, total: 5 });
   assert.equal(clockLabel(190 * 60000), "03:10:00");
   assert.equal(clockLabel(-1), "00:00:00");
+});
+
+test("the next question refresh is the coming midnight in Manila", () => {
+  // 11:59 PM on Nov 12 in Manila is 15:59 UTC.
+  assert.equal(new Date(nextQuestionRefresh(Date.parse("2026-11-12T15:59:00Z"))).toISOString(), "2026-11-12T16:00:00.000Z");
+  // Exactly at midnight, the next refresh is a full day away.
+  assert.equal(new Date(nextQuestionRefresh(Date.parse("2026-11-12T16:00:00Z"))).toISOString(), "2026-11-13T16:00:00.000Z");
+  assert.equal(new Date(nextQuestionRefresh(Date.parse("2026-11-13T03:00:00Z"))).toISOString(), "2026-11-13T16:00:00.000Z");
+});
+
+test("countdown labels round up to whole minutes", () => {
+  assert.equal(countdownLabel(30 * 1000), "1 min");
+  assert.equal(countdownLabel(59 * 60000), "59 min");
+  assert.equal(countdownLabel(60 * 60000), "1 hr");
+  assert.equal(countdownLabel(5 * 3600000 + 11.5 * 60000), "5 hr 12 min");
 });

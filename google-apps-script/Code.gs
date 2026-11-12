@@ -7,8 +7,19 @@ const SCORE_HEADERS = [
 ];
 const PUBLIC_NAME_COLUMN = SCORE_HEADERS.length + 1;
 const PUBLIC_NAME_HEADER = "Public display name";
+// Answers kept on the device can be submitted after the deadline when the tab was closed at
+// expiry. Those scores are still graded and saved, but stay off the leaderboard. The grace
+// period covers a slow network or one retry for an exam that ended while the tab was open.
+const LATE_GRACE_MS = 2 * 60000;
+const LATE_COLUMN = PUBLIC_NAME_COLUMN + 1;
+const LATE_HEADER = "Submitted late";
+// The organizer types Yes (or ticks a checkbox) here to take a score off the leaderboard.
+const HIDDEN_COLUMN = LATE_COLUMN + 1;
+const HIDDEN_HEADER = "Hide from leaderboard";
+// Faster than this average can't be a real attempt, for example someone pasting from a
+// collected answer key. The real exam allows about 76 seconds per item.
+const MIN_SECONDS_PER_ITEM = 15;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-const ORIGIN_PATTERN = /^(https:\/\/[a-z0-9.-]+(?::\d+)?|http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?)$/i;
 const EXAM_FORMATS = {
   professional: { minutes: 190, sections: { verbal: 43, numerical: 37, analytical: 38, general: 32 } },
   subprofessional: { minutes: 160, sections: { verbal: 42, numerical: 35, clerical: 38, general: 30 } },
@@ -26,8 +37,7 @@ function setup() {
   if (sheet.getLastRow() === 0) {
     sheet.appendRow(SCORE_HEADERS);
     sheet.setFrozenRows(1);
-    sheet.getRange(1, 1, 1, SCORE_HEADERS.length)
-      .setBackground("#143b30").setFontColor("#ffffff").setFontWeight("bold");
+    styleHeader_(sheet.getRange(1, 1, 1, SCORE_HEADERS.length));
     sheet.setColumnWidth(1, 285);
     sheet.setColumnWidth(2, 165);
     sheet.setColumnWidth(3, 180);
@@ -36,6 +46,8 @@ function setup() {
     throw new Error("The Scores tab already has different headers. Rename that tab before running setup.");
   }
   ensurePublicNameColumn_(sheet);
+  ensureHeaderColumn_(sheet, LATE_COLUMN, LATE_HEADER);
+  ensureHeaderColumn_(sheet, HIDDEN_COLUMN, HIDDEN_HEADER);
   const properties = PropertiesService.getScriptProperties();
   properties.setProperty("SCORE_SPREADSHEET_ID", spreadsheet.getId());
   if (!properties.getProperty(SIGNING_KEY_PROPERTY)) {
@@ -47,24 +59,19 @@ function doGet() {
   return ContentService.createTextOutput("CSC Reviewer timed exam service");
 }
 
+// Every response is JSON. The browser still sends transport=json, which this version ignores,
+// so the site keeps working against deployments made before the iframe receipt was removed.
 function doPost(event) {
-  const useJson = event.parameter.transport === "json";
   let submission;
   try {
     const raw = event.parameter.submission;
     if (!raw || raw.length > 65000) throw new Error("Invalid request.");
     submission = JSON.parse(raw);
   } catch {
-    return useJson ? jsonExamResponse_({ ok: false, message: "Invalid request." })
-      : ContentService.createTextOutput("Invalid request.");
+    return jsonExamResponse_({ ok: false, message: "Invalid request." });
   }
   if (!submission || typeof submission !== "object" || Array.isArray(submission)) {
-    return useJson ? jsonExamResponse_({ ok: false, message: "Invalid request." })
-      : ContentService.createTextOutput("Invalid request.");
-  }
-  if (!useJson && (typeof submission.token !== "string" || !UUID_PATTERN.test(submission.token) ||
-      typeof submission.origin !== "string" || !ORIGIN_PATTERN.test(submission.origin))) {
-    return ContentService.createTextOutput("Invalid receipt destination.");
+    return jsonExamResponse_({ ok: false, message: "Invalid request." });
   }
 
   let result;
@@ -80,15 +87,7 @@ function doPost(event) {
     result = { ok: false, message: error.publicMessage || service + " is unavailable. Try again." };
   }
 
-  if (useJson) return jsonExamResponse_(result);
-
-  // Support clients loaded before the JSON transport was deployed.
-  const receipt = JSON.stringify({ type: "csc-reviewer-score", token: submission.token, ...result })
-    .replace(/</g, "\\u003c").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
-  return HtmlService.createHtmlOutput(
-    "<!doctype html><script>window.top.postMessage(" + receipt + "," +
-    JSON.stringify(submission.origin) + ");</script>"
-  ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  return jsonExamResponse_(result);
 }
 
 function jsonExamResponse_(result) {
@@ -261,9 +260,23 @@ function submitExam_(request) {
   const elapsedSeconds = Math.max(0, Math.floor((Math.min(Date.now(), attempt.deadline) - attempt.start) / 1000));
   const percentage = Math.round(10000 * correct / total) / 100;
   const digest = signExam_(JSON.stringify(canonicalAnswers));
-  const publishName = request.publishName === true && name !== "Anonymous";
-  const elapsed = appendScore_({ ...attempt, name, correct, total, percentage, elapsedSeconds, publishName }, digest);
-  return { correct, answered, total, percentage, sections, elapsedSeconds: elapsed, solutions };
+  const late = Date.now() > attempt.deadline + LATE_GRACE_MS;
+  const publishName = request.publishName === true && name !== "Anonymous" && !late;
+  const saved = appendScore_({ ...attempt, name, correct, total, percentage, elapsedSeconds, publishName, late }, digest);
+  return {
+    correct, answered, total, percentage, sections, solutions,
+    elapsedSeconds: saved.elapsedSeconds,
+    late: saved.late,
+    tooFast: !isPlausibleTime_(saved.elapsedSeconds, total),
+  };
+}
+
+function isPlausibleTime_(elapsedSeconds, total) {
+  return Number.isFinite(elapsedSeconds) && elapsedSeconds >= total * MIN_SECONDS_PER_ITEM;
+}
+
+function isMarked_(value) {
+  return value === true || /^(yes|y|x|true)$/i.test(String(value).trim());
 }
 
 function openScoreSpreadsheet_() {
@@ -294,6 +307,8 @@ function saveFeedback_(request) {
     if (lastRow === 0) {
       sheet.appendRow(FEEDBACK_HEADERS);
       sheet.setFrozenRows(1);
+      styleHeader_(sheet.getRange(1, 1, 1, FEEDBACK_HEADERS.length));
+      sheet.setColumnWidth(3, 480);
     } else if (sheet.getRange(1, 1, 1, FEEDBACK_HEADERS.length).getValues()[0].join("|") !== FEEDBACK_HEADERS.join("|")) {
       throw new Error("The Feedback tab already has different headers.");
     }
@@ -312,12 +327,23 @@ function saveFeedback_(request) {
 }
 
 function ensurePublicNameColumn_(sheet) {
-  const header = sheet.getRange(1, PUBLIC_NAME_COLUMN);
+  ensureHeaderColumn_(sheet, PUBLIC_NAME_COLUMN, PUBLIC_NAME_HEADER);
+}
+
+function ensureHeaderColumn_(sheet, column, title) {
+  const header = sheet.getRange(1, column);
   const value = header.getValue();
-  if (value === PUBLIC_NAME_HEADER) return;
-  if (value) throw new Error("The public display name column is already in use.");
-  header.setValue(PUBLIC_NAME_HEADER).setBackground("#143b30").setFontColor("#ffffff").setFontWeight("bold");
-  sheet.setColumnWidth(PUBLIC_NAME_COLUMN, 180);
+  if (value === title) return;
+  if (value) throw new Error("The " + title + " column is already in use.");
+  styleHeader_(header.setValue(title));
+  sheet.setColumnWidth(column, 180);
+}
+
+// Matches the header row the organizer styled by hand: bold dark text on light grey, with borders.
+function styleHeader_(range) {
+  return range.setBackground("#f1f3f4").setFontColor("#202124").setFontWeight("bold")
+    .setFontFamily("Carlito").setFontSize(11)
+    .setBorder(true, true, true, true, true, true);
 }
 
 function readLeaderboard_(request) {
@@ -329,23 +355,37 @@ function readLeaderboard_(request) {
   const sheet = openScoreSheet_();
   const rowCount = sheet.getLastRow() - 1;
   if (rowCount < 1) return { scores: [] };
-  const hasPublicNames = sheet.getRange(1, PUBLIC_NAME_COLUMN).getValue() === PUBLIC_NAME_HEADER;
+  // Only trust the optional columns whose headers match, in case a column was repurposed.
+  const lastColumn = Math.max(SCORE_HEADERS.length, Math.min(sheet.getLastColumn(), HIDDEN_COLUMN));
+  const header = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const hasColumn = (column, title) => header[column - 1] === title;
+  const hasPublicNames = hasColumn(PUBLIC_NAME_COLUMN, PUBLIC_NAME_HEADER);
+  const hasLateFlags = hasColumn(LATE_COLUMN, LATE_HEADER);
+  const hasHiddenFlags = hasColumn(HIDDEN_COLUMN, HIDDEN_HEADER);
   const levelLabel = level === "professional" ? "Professional" : "Subprofessional";
   const modeLabel = mode === "quick" ? "Quick practice" : "Full mock exam";
   const expectedTotal = mode === "quick" ? 20 : Object.values(EXAM_FORMATS[level].sections).reduce((sum, size) => sum + size, 0);
   // Start at column D so private names and attempt IDs never enter the leaderboard data.
-  const rows = sheet.getRange(2, 4, rowCount, hasPublicNames ? 7 : 6).getValues();
+  const rows = sheet.getRange(2, 4, rowCount, lastColumn - 3).getValues();
   const scores = rows
-    .filter(([rowLevel, rowMode, correct, total]) => rowLevel === levelLabel && rowMode === modeLabel &&
-      total === expectedTotal && Number.isInteger(correct) && correct >= 0 && correct <= total)
-    .map(([, , correct, total, , , publicName]) => ({
-      displayName: typeof publicName === "string" && publicName.trim() ? publicName.trim().slice(0, 80) : "Anonymous",
+    .filter(([rowLevel, rowMode, correct, total, , elapsedSeconds, , late, hidden]) =>
+      rowLevel === levelLabel && rowMode === modeLabel &&
+      total === expectedTotal && Number.isInteger(correct) && correct >= 0 && correct <= total &&
+      isPlausibleTime_(elapsedSeconds, total) &&
+      !(hasLateFlags && late === "Yes") &&
+      !(hasHiddenFlags && isMarked_(hidden)))
+    .map(([, , correct, total, , elapsedSeconds, publicName]) => ({
+      displayName: hasPublicNames && typeof publicName === "string" && publicName.trim()
+        ? publicName.trim().slice(0, 80) : "Anonymous",
       correct,
       total,
       percentage: Math.round(10000 * correct / total) / 100,
+      elapsedSeconds,
     }))
-    .sort((first, second) => second.correct - first.correct)
-    .slice(0, 5);
+    // Equal scores rank by time used, so the faster attempt places higher.
+    .sort((first, second) => second.correct - first.correct || first.elapsedSeconds - second.elapsedSeconds)
+    .slice(0, 5)
+    .map(({ elapsedSeconds, ...score }) => score);
   return { scores };
 }
 
@@ -360,20 +400,27 @@ function appendScore_(score, digest) {
       .createTextFinder(score.id).matchEntireCell(true).findNext();
     if (previous) {
       if (previous.getNote() !== digest) invalidExam_("This attempt has already been submitted.");
-      return sheet.getRange(previous.getRow(), 9).getValue();
+      // A retry reports what was first saved, so a slow retry can't turn an on-time score late.
+      const row = previous.getRow();
+      return {
+        elapsedSeconds: sheet.getRange(row, 9).getValue(),
+        late: sheet.getRange(row, LATE_COLUMN).getValue() === "Yes",
+      };
     }
 
-    if (score.publishName) ensurePublicNameColumn_(sheet);
+    if (score.publishName || score.late) ensurePublicNameColumn_(sheet);
+    if (score.late) ensureHeaderColumn_(sheet, LATE_COLUMN, LATE_HEADER);
     const safeName = /^[=+\-@]/.test(score.name) ? "'" + score.name : score.name;
     sheet.appendRow([
       score.id, new Date(), safeName, score.level === "professional" ? "Professional" : "Subprofessional",
       score.mode === "quick" ? "Quick practice" : "Full mock exam", score.correct, score.total,
       score.percentage, score.elapsedSeconds,
       score.publishName ? "'" + score.name : "",
+      score.late ? "Yes" : "",
     ]);
     sheet.getRange(sheet.getLastRow(), 1).setNote(digest);
     SpreadsheetApp.flush();
-    return score.elapsedSeconds;
+    return { elapsedSeconds: score.elapsedSeconds, late: score.late };
   } finally {
     lock.releaseLock();
   }

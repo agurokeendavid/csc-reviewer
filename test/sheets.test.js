@@ -3,7 +3,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
-import { BANK } from "../lib/exam.js";
+import { BANK, MIN_SECONDS_PER_ITEM } from "../lib/exam.js";
 
 const script = readFileSync(new URL("../google-apps-script/Code.gs", import.meta.url), "utf8");
 const privateBank = new URL("../google-apps-script/ExamBank.gs", import.meta.url);
@@ -25,12 +25,16 @@ function mockSheet(rows) {
   return {
     appendRow: (values) => rows.push(values),
     getLastRow: () => rows.length,
+    getLastColumn: () => Math.max(0, ...rows.map((row) => row.length)),
     setFrozenRows: () => {},
     setColumnWidth: () => {},
     getRange: (row, column, height = 1, width = 1) => ({
       setBackground() { return this; },
       setFontColor() { return this; },
       setFontWeight() { return this; },
+      setFontFamily() { return this; },
+      setFontSize() { return this; },
+      setBorder() { return this; },
       getValues: () => rows.slice(row - 1, row - 1 + height).map((values) =>
         values.slice(column - 1, column - 1 + width).map((value, index) =>
           column + index === 10 && typeof value === "string" ? value.replace(/^'/, "") : value)),
@@ -99,10 +103,6 @@ function mockAppsScript(random = Math.random) {
       MimeType: { JSON: "application/json" },
       createTextOutput: (content) => ({ content, setMimeType: (mimeType) => ({ content, mimeType }) }),
     },
-    HtmlService: {
-      createHtmlOutput: (html) => ({ setXFrameOptionsMode: () => html }),
-      XFrameOptionsMode: { ALLOWALL: "ALLOWALL" },
-    },
     console: { error() {} },
   };
   const app = runInNewContext(`${bankSource}\n${script}\n({
@@ -115,27 +115,13 @@ function mockAppsScript(random = Math.random) {
   return { app, rows, feedbackRows, setTime: (time) => { now = time; } };
 }
 
-function send(app, fields) {
-  const token = randomUUID();
-  const origin = "https://reviewer.example";
-  const html = app.doPost({ parameter: { submission: JSON.stringify({ token, origin, ...fields }) } });
-  if (typeof html !== "string") return html.content;
-  const code = html.match(/<script>([\s\S]*)<\/script>/)?.[1];
-  if (!code) return html;
-  let receipt;
-  runInNewContext(code, { window: { top: { postMessage(data, target) {
-    assert.equal(data.token, token);
-    assert.equal(target, origin);
-    receipt = data;
-  } } } });
-  return receipt;
-}
-
 function sendJson(app, fields) {
   const response = app.doPost({ parameter: { transport: "json", submission: JSON.stringify(fields) } });
   assert.equal(response.mimeType, "application/json");
   return JSON.parse(response.content);
 }
+
+const send = sendJson;
 
 test("feedback validates messages and stores anonymous retries once in a separate tab", () => {
   const { app, rows, feedbackRows } = mockAppsScript();
@@ -354,8 +340,42 @@ test("rejects forged tickets, invalid answers, and the previous unsigned score f
   assert.equal(send(app, { ...submission, answers: { [exam.questions[0].id]: "invalid" } }).ok, false);
   assert.equal(send(app, { ...submission, answers: { "not-assigned": "invalid" } }).ok, false);
   assert.equal(send(app, { id: exam.id, correct: 20, total: 20 }).ok, false);
-  assert.equal(send(app, { ...submission, origin: "</script>" }), "Invalid receipt destination.");
   assert.equal(rows.length, 1);
+});
+
+test("requests without the transport field still get JSON and never an HTML receipt", () => {
+  const { app } = mockAppsScript();
+  const response = app.doPost({ parameter: { submission: JSON.stringify({
+    action: "leaderboard", level: "professional", mode: "quick", token: randomUUID(), origin: "</script>",
+  }) } });
+  assert.equal(response.mimeType, "application/json");
+  assert.deepEqual(JSON.parse(response.content), { ok: true, data: { scores: [] } });
+  assert.equal(JSON.parse(app.doPost({ parameter: { submission: "{" } }).content).ok, false);
+});
+
+test("submissions past the grace period are saved as late and kept off the leaderboard", () => {
+  const { app, rows, setTime } = mockAppsScript();
+  const onTime = start(app);
+  const late = start(app);
+  setTime(onTime.deadline + 60000);
+  const first = send(app, { action: "submit", ticket: onTime.ticket, name: "On time", publishName: true, answers: {} });
+  assert.equal(first.data.late, false);
+  setTime(late.deadline + 3 * 60000);
+  const second = send(app, { action: "submit", ticket: late.ticket, name: "Too late", publishName: true, answers: {} });
+  assert.equal(second.ok, true);
+  assert.equal(second.data.late, true);
+  assert.ok(Object.keys(second.data.solutions).length > 0);
+  assert.equal(second.data.elapsedSeconds, 25 * 60);
+  assert.equal(rows[0][10], "Submitted late");
+  assert.equal(rows[2][2], "Too late");
+  assert.equal(rows[2][9], "");
+  assert.equal(rows[2][10], "Yes");
+
+  // Retrying the on-time attempt after the grace period keeps its original status.
+  const retry = send(app, { action: "submit", ticket: onTime.ticket, name: "On time", publishName: true, answers: {} });
+  assert.equal(retry.data.late, false);
+  const board = sendJson(app, { action: "leaderboard", level: "professional", mode: "quick" });
+  assert.deepEqual(board.data.scores.map(({ displayName }) => displayName), ["On time"]);
 });
 
 test("name remains optional and formula-like values are stored as text", () => {
@@ -371,12 +391,12 @@ test("name remains optional and formula-like values are stored as text", () => {
 test("leaderboard returns the top five for one format without exposing private names or attempt data", () => {
   const { app, rows } = mockAppsScript();
   rows.push(
-    ["id-a", new Date(), "Private A", "Professional", "Quick practice", 12, 20, 60, 100],
-    ["id-b", new Date(), "Private B", "Professional", "Quick practice", 17, 20, 85, 110, "'Shared alias"],
-    ["id-c", new Date(), "Private C", "Professional", "Quick practice", 18, 20, 90, 120],
-    ["id-d", new Date(), "Private D", "Professional", "Quick practice", 13, 20, 65, 130],
-    ["id-e", new Date(), "Private E", "Professional", "Quick practice", 14, 20, 70, 140],
-    ["id-f", new Date(), "Private F", "Professional", "Quick practice", 15, 20, 75, 150],
+    ["id-a", new Date(), "Private A", "Professional", "Quick practice", 12, 20, 60, 1000],
+    ["id-b", new Date(), "Private B", "Professional", "Quick practice", 17, 20, 85, 1100, "'Shared alias"],
+    ["id-c", new Date(), "Private C", "Professional", "Quick practice", 18, 20, 90, 1200],
+    ["id-d", new Date(), "Private D", "Professional", "Quick practice", 13, 20, 65, 1300],
+    ["id-e", new Date(), "Private E", "Professional", "Quick practice", 14, 20, 70, 1400],
+    ["id-f", new Date(), "Private F", "Professional", "Quick practice", 15, 20, 75, 1500],
     ["id-g", new Date(), "Other level", "Subprofessional", "Quick practice", 20, 20, 100, 150],
     ["id-h", new Date(), "Other mode", "Professional", "Full mock exam", 150, 150, 100, 150],
     ["id-i", new Date(), "Invalid total", "Professional", "Quick practice", 30, 30, 100, 150],
@@ -389,15 +409,57 @@ test("leaderboard returns the top five for one format without exposing private n
   for (const item of result.data.scores) assert.deepEqual(Object.keys(item).sort(), ["correct", "displayName", "percentage", "total"]);
 });
 
-test("only scores explicitly opting in get a public display name", () => {
+test("setup adds the late and hide columns next to the public name", () => {
+  const { rows } = mockAppsScript();
+  assert.deepEqual(Array.from(rows[0].slice(9)), ["Public display name", "Submitted late", "Hide from leaderboard"]);
+});
+
+test("the organizer can hide a score, and implausibly fast scores are never listed", () => {
   const { app, rows } = mockAppsScript();
-  // Simulate a sheet created before the public-name column was introduced.
-  rows[0].pop();
+  rows.push(
+    ["id-real", new Date(), "Real", "Professional", "Quick practice", 15, 20, 75, 900, "'Real"],
+    ["id-hidden", new Date(), "Hidden", "Professional", "Quick practice", 20, 20, 100, 900, "'Hidden", "", "Yes"],
+    ["id-checkbox", new Date(), "Checkbox", "Professional", "Quick practice", 19, 20, 95, 900, "'Checkbox", "", true],
+    ["id-fast", new Date(), "Fast", "Professional", "Quick practice", 20, 20, 100, 299, "'Fast"],
+    ["id-floor", new Date(), "Floor", "Professional", "Quick practice", 14, 20, 70, 300, "'Floor"],
+  );
+  const result = sendJson(app, { action: "leaderboard", level: "professional", mode: "quick" });
+  assert.deepEqual(result.data.scores.map(({ displayName }) => displayName), ["Real", "Floor"]);
+});
+
+test("submit reports when a score is too fast for the leaderboard", () => {
+  const { app, setTime } = mockAppsScript();
+  const quick = start(app);
+  const steady = start(app);
+  assert.equal(send(app, { action: "submit", ticket: quick.ticket, answers: {} }).data.tooFast, true);
+  setTime(steady.start + 5 * 60000);
+  assert.equal(send(app, { action: "submit", ticket: steady.ticket, answers: {} }).data.tooFast, false);
+});
+
+test("leaderboard ties rank the faster attempt first", () => {
+  const { app, rows } = mockAppsScript();
+  rows.push(
+    ["id-slow", new Date(), "Slow", "Professional", "Quick practice", 18, 20, 90, 1400, "'Slow"],
+    ["id-fast", new Date(), "Fast", "Professional", "Quick practice", 18, 20, 90, 600, "'Fast"],
+  );
+  const result = sendJson(app, { action: "leaderboard", level: "professional", mode: "quick" });
+  assert.deepEqual(result.data.scores.map(({ displayName }) => displayName), ["Fast", "Slow"]);
+});
+
+test("only scores explicitly opting in get a public display name", () => {
+  const { app, rows, setTime } = mockAppsScript();
+  // Simulate a sheet created before the optional columns were introduced.
+  rows[0].length = 9;
   const anonymous = start(app);
   const visible = start(app);
+  setTime(visible.start + 10 * 60000);
   assert.equal(sendJson(app, { action: "submit", ticket: anonymous.ticket, name: "Private name", answers: {} }).ok, true);
   assert.equal(sendJson(app, { action: "submit", ticket: visible.ticket, name: "Public name", publishName: true, answers: {} }).ok, true);
   assert.equal(rows[0][9], "Public display name");
   const result = sendJson(app, { action: "leaderboard", level: "professional", mode: "quick" });
   assert.deepEqual(result.data.scores.map(({ displayName }) => displayName), ["Anonymous", "Public name"]);
+});
+
+test("the browser and Apps Script use the same minimum time per question", () => {
+  assert.match(script, new RegExp(`const MIN_SECONDS_PER_ITEM = ${MIN_SECONDS_PER_ITEM};`));
 });
