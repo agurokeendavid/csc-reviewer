@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, Bookmark, BookOpen, BriefcaseBusiness,
-  Calculator, Check, ChevronRight, ClipboardCheck, Clock3, FileText, GraduationCap,
+  Calculator, Check, ChevronRight, ClipboardCheck, Clock3, FileText, Github, GraduationCap,
   Landmark, ListChecks, LockKeyhole, RotateCcw, Timer, UserRound, Workflow, Zap,
 } from "lucide-react";
 import { clockLabel, CSC_GUIDE, durationLabel, LEVELS, makeStudy, QUICK_MODE, SECTIONS, weakestSection } from "../lib/exam.js";
@@ -358,7 +358,10 @@ function SubmissionLoader() {
   return (
     <dialog className="confirmation submission-loader" ref={dialog}
       onCancel={(event) => event.preventDefault()} aria-labelledby="submission-title">
-      <div className="submission-spinner" aria-hidden="true"><span /></div>
+      <div className="submission-spinner" aria-hidden="true">
+        <span className="submission-spinner-ring" />
+        <span className="submission-spinner-dot" />
+      </div>
       <h2 id="submission-title">Submitting your exam</h2>
       <p role="status">Grading your answers and saving your score…</p>
     </dialog>
@@ -594,7 +597,13 @@ export default function Reviewer() {
       </main>
       <footer className="shell site-footer"><p>Unofficial Philippine Civil Service Exam reviewer · Original practice questions</p>
         <p>Created by Keen David Aguro</p>
-        <a href={CSC_GUIDE} target="_blank" rel="noreferrer">Official exam scope <ArrowUpRight size={14} /></a></footer>
+        <nav className="footer-links" aria-label="Project links">
+          <a href="https://github.com/agurokeendavid/csc-reviewer" target="_blank" rel="noreferrer">
+            <Github size={14} aria-hidden="true" /> GitHub repository
+          </a>
+          <a href={CSC_GUIDE} target="_blank" rel="noreferrer">Official exam scope <ArrowUpRight size={14} /></a>
+        </nav>
+      </footer>
     </>
   );
 }

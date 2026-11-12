@@ -121,6 +121,7 @@ fieldset { margin: 17px 0 0; padding: 0; border: 0; min-width: 0; }
 .source-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 13px; color: var(--accent); font-size: 13px; font-weight: 800; }
 .site-footer { display: flex; justify-content: space-between; gap: 14px; padding: 20px 0 24px; color: var(--muted); font-size: 12px; }
 .site-footer a { display: inline-flex; align-items: center; gap: 5px; font-weight: 750; }
+.footer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .practice-path { margin: 0 0 16px; }
 .practice-path .choices { gap: 14px; }
@@ -177,27 +178,26 @@ fieldset { margin: 17px 0 0; padding: 0; border: 0; min-width: 0; }
   border-radius: 50%;
   background: var(--light-green);
 }
-.submission-spinner::before {
-  content: "";
+.submission-spinner-ring {
   position: absolute;
   inset: 0;
   border: 4px solid #d0e4d8;
   border-top-color: var(--accent);
-  border-right-color: #72b598;
+  border-right-color: var(--accent);
   border-radius: inherit;
-  animation: submission-spin .75s linear infinite;
+  animation: submission-spin .8s linear infinite;
 }
-.submission-spinner span {
+.submission-spinner-dot {
   width: 13px;
   height: 13px;
   border-radius: 50%;
   background: var(--accent);
-  animation: submission-pulse 1.1s ease-in-out infinite alternate;
 }
-@keyframes submission-spin { to { transform: rotate(1turn); } }
-@keyframes submission-pulse { from { transform: scale(.65); opacity: .45; } to { transform: scale(1); opacity: 1; } }
+@keyframes submission-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes submission-fade { from { opacity: .45; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  .submission-spinner::before, .submission-spinner span { animation: none; }
+  .submission-spinner-ring { animation: none; }
+  .submission-spinner-dot { animation: submission-fade 1.2s ease-in-out infinite alternate; }
 }
 .result-hero .save-warning { color: #85492a; }
 
