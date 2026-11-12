@@ -1,4 +1,3 @@
-import { History } from "lucide-react";
 import { LEVELS, SECTIONS } from "../lib/exam.js";
 
 const dateFormat = new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short" });
@@ -9,8 +8,8 @@ function sameFormat(first, second) {
 }
 
 function attemptLabel(entry) {
-  if (entry.mode === "study") return `Study · ${entry.topic || SECTIONS[entry.section]}`;
-  return `${LEVELS[entry.level].label} · ${entry.mode === "full" ? "Full mock" : "Quick practice"}`;
+  if (entry.mode === "study") return `Study: ${entry.topic || SECTIONS[entry.section]}`;
+  return `${LEVELS[entry.level].label}, ${entry.mode === "full" ? "full mock" : "quick practice"}`;
 }
 
 function changeLabel(score, previous) {
@@ -23,9 +22,9 @@ function changeLabel(score, previous) {
 export default function ScoreHistory({ entries, ready }) {
   return (
     <section className="panel history-panel" id="history" aria-labelledby="history-title">
-      <div className="coverage-heading"><span className="section-icon"><History size={20} /></span><h2 id="history-title">Score history</h2></div>
-      <p className="section-intro">Recent scores on this device. Open an attempt to see how each subject changed.</p>
-      {ready && entries.length === 0 && <p className="history-empty">Complete a mock exam or study session to see your first score here.</p>}
+      <h2 id="history-title">Your history</h2>
+      <p className="section-intro">Your last 30 scores, saved in this browser only. Open one to compare subjects with your previous try.</p>
+      {ready && entries.length === 0 && <p className="history-empty">Nothing yet. Your scores will show up here after you finish an exam or study session.</p>}
       {entries.map((entry, index) => {
         const previous = entries.slice(index + 1).find((older) => sameFormat(entry, older));
         return (
@@ -33,7 +32,7 @@ export default function ScoreHistory({ entries, ready }) {
             <summary><span>{attemptLabel(entry)} <small>{dateFormat.format(entry.date)}</small></span>
               <strong>{entry.percentage}%</strong></summary>
             <div className="history-breakdown">
-              {previous && <p>Compared with your previous attempt in this format. Changes are in percentage points.</p>}
+              {previous && <p>Change from your previous try in the same format, in percentage points.</p>}
               <ul>
                 {Object.entries(entry.sections).map(([key, score]) => (
                   <li key={key}><span>{SECTIONS[key]}</span><strong>{score.correct} / {score.total}</strong>

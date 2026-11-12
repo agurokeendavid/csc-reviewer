@@ -38,14 +38,14 @@ function FeedbackForm({ onClose, status, setStatus }) {
 
   if (status === "saved") return (
     <>
-      <p role="status">Thanks. Your feedback was sent to the site owner.</p>
+      <p role="status">Thanks, your feedback was sent.</p>
       <div className="question-actions"><button type="button" className="button primary" onClick={onClose}>Done</button></div>
     </>
   );
 
   return (
     <form onSubmit={submit} aria-busy={pending}>
-      <p id="feedback-hint">Share a suggestion or report a problem. Your message goes to the site owner.</p>
+      <p id="feedback-hint">Found a wrong answer or a bug? Tell the site owner. Don’t include personal details.</p>
       <label className="field-label feedback-label" htmlFor="feedback-message">Your feedback</label>
       <textarea id="feedback-message" className="feedback-message" value={message}
         onChange={(event) => setMessage(event.target.value)} maxLength={MAX_FEEDBACK_LENGTH}
@@ -81,7 +81,7 @@ function ResourceDialog({ menu, onClose }) {
       <h2 id="resource-title">{feedback ? "Feedback" : "References"}</h2>
       {feedback ? <FeedbackForm onClose={onClose} status={status} setStatus={setStatus} /> : (
         <>
-          <p>We use the CSC exam scope to choose topics and these references to verify the answers to our General Information questions.</p>
+          <p>Topics follow the CSC exam scope. General Information answers were checked against these sources.</p>
           <ul className="reference-list">
             {references.map(({ source, sourceTitle }) => (
               <li key={source}>

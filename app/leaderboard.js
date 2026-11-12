@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { Trophy } from "lucide-react";
-import { LEVELS } from "../lib/exam.js";
+import { LEVELS, MIN_SECONDS_PER_ITEM } from "../lib/exam.js";
 import { requestExam } from "../lib/scores.js";
 
 export default function Leaderboard({ initialLevel = "professional", initialMode = "full" }) {
@@ -22,10 +21,9 @@ export default function Leaderboard({ initialLevel = "professional", initialMode
 
   return (
     <section className="panel leaderboard" id="leaderboard" aria-labelledby="leaderboard-title">
-      <div className="coverage-heading">
-        <span className="section-icon"><Trophy size={20} aria-hidden="true" /></span>
-        <h2 id="leaderboard-title">Top 5 scores</h2>
-      </div>
+      <h2 id="leaderboard-title">Top scores</h2>
+      <p className="section-intro">The five best timed results. Names appear only if the test taker chose to show them.
+        Scores finished in under {MIN_SECONDS_PER_ITEM} seconds per question or submitted after the time limit aren’t listed.</p>
       <div className="leaderboard-filters">
         <label>Level
           <select className="study-select" value={level} onChange={(event) => setLevel(event.target.value)}>
@@ -39,16 +37,16 @@ export default function Leaderboard({ initialLevel = "professional", initialMode
           </select>
         </label>
       </div>
-      {!current && <p className="section-intro" role="status">Loading top scores…</p>}
-      {current?.failed && <p className="section-intro" role="status">Top scores are unavailable.{" "}
+      {!current && <p className="section-intro" role="status">Loading…</p>}
+      {current?.failed && <p className="section-intro" role="status">Couldn’t load the top scores.{" "}
         <button type="button" className="text-button" onClick={() => setRequestCount((count) => count + 1)}>Retry</button>
       </p>}
-      {current?.scores?.length === 0 && <p className="section-intro" role="status">No scores yet for this format.</p>}
+      {current?.scores?.length === 0 && <p className="section-intro" role="status">No scores yet. Finish an exam in this format to be the first.</p>}
       {current?.scores?.length > 0 && (
         <ol className="leaderboard-list">
           {current.scores.map(({ displayName, correct, total, percentage }, index) => (
             <li key={index}>
-              <span className="leaderboard-rank" aria-hidden="true">{index + 1}</span>
+              <span className="leaderboard-rank" aria-hidden="true">{index + 1}.</span>
               <strong className="leaderboard-name">{displayName}</strong>
               <span className="leaderboard-score"><strong>{percentage}%</strong><small>{correct} / {total}</small></span>
             </li>
