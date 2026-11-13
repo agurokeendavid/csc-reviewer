@@ -73,3 +73,7 @@ The frontend is a static export. Google Apps Script handles score writes. See th
 - [AI CLI project instructions](AGENTS.md)
 - Run `npm run lint` for ESLint with the Next.js rules, `npm test` for question generation, grading, and score-write checks with mocked Google services, and `npm run build` to verify the static export.
 - GitHub Actions runs all three on every push and pull request. Tests that need the private question bank are skipped there because `ExamBank.gs` isn't in the repository.
+
+## License
+
+The code is released under the [MIT License](LICENSE). The private timed question bank (`ExamBank.gs`) isn't part of this repository.
