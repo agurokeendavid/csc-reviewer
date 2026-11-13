@@ -23,11 +23,13 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     // The inline script may switch data-theme to dark before React hydrates.
+    // It sits at the top of <body> rather than in an explicit <head>, so the comment Netlify
+    // inserts into <head> doesn't cause a hydration mismatch. It still runs before first paint.
     <html lang="en-PH" data-theme="light" suppressHydrationWarning>
-      <head>
+      <body>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
-      <body>{children}</body>
+        {children}
+      </body>
     </html>
   );
 }
